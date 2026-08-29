@@ -1,0 +1,203 @@
+"""معالجة النصوص: روابط، بحث يوتيوب، أزرار النظام."""
+import asyncio
+import logging
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes
+
+from .. import db, downloader
+from ..config import OWNER_ID
+from ..jobs import schedule_download
+from ..state import _SEARCH_RESULTS, _USER_BUSY
+from .system import (
+    esc,
+    fmt_duration,
+    get_owner_state,
+    looks_like_url,
+    main_keyboard,
+    owner_card,
+    send_stats_reply,
+    vip_bar,
+)
+from ..config import (
+    DAILY_REWARD_POINTS,
+    POINTS_PER_AUDIO,
+    POINTS_PER_REFERRAL,
+    POINTS_PER_VIDEO,
+    VIP_THRESHOLD,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    uid = user.id
+    text = (update.message.text or "").strip()
+    chat_id = update.effective_chat.id
+    logger.info("📥 رسالة من %s: %s", uid, text[:80])
+
+    # أزرار النظام
+    if text == "👤 حسابي":
+        await send_stats_reply(update, context)
+        return
+    if text in ("📥 تحميل/بحث", "تحميل/بحث", "📥"):
+        await update.message.reply_text(
+            "📥 <b>تحميل / بحث</b>\n"
+            "أرسل رابط فيديو مباشرة للتحميل، أو اكتب إسم أغنية/مقطع وسأبحث لك على يوتيوب.\n\n"
+            "✦ <b>الروابط المدعومة:</b> YouTube • Instagram • TikTok • Facebook",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if text in ("ℹ️ المساعدة", "مساعدة", "ℹ️"):
+        from .help import cmd_help
+        await cmd_help(update, context)
+        return
+    if text in ("🎁 مكافأة يومية", "مكافأة", "🎁"):
+        from .help import cmd_daily
+        await cmd_daily(update, context)
+        return
+    if text in ("🔗 رابط الدعوة", "دعوة", "🔗"):
+        from .help import cmd_referral
+        await cmd_referral(update, context)
+        return
+    if text in ("⭐ نظام الـ VIP", "نظام الـ VIP", "VIP", "⭐"):
+        await _vip_card(update, context)
+        return
+    if text in ("💬 كروب المناقشة", "كروب المناقشة", "كروب", "💬"):
+        await _discussion_group(update, context)
+        return
+    if text in ("👑 المالك", "👑 لوحة المالك"):
+        if uid == OWNER_ID:
+            from .owner import cmd_owner
+            await cmd_owner(update, context)
+        else:
+            txt, kb = owner_card()
+            await update.message.reply_text(txt, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
+    # حالة إدخال المالك
+    if uid == OWNER_ID and get_owner_state(uid):
+        from .owner import handle_owner_input
+        await handle_owner_input(update, context)
+        return
+
+    u, _ = db.get_or_create_user(uid, user.username, user.first_name)
+    if u["is_banned"]:
+        await update.message.reply_text("⛔ أنت محظور من استخدام هذا البوت.")
+        return
+
+    # اشتراك إجباري
+    from .subscription import check_limits, join_prompt, sub_status
+    status = await sub_status(context.bot, uid)
+    if status != "ok":
+        await join_prompt(context.bot, uid, chat_id)
+        return
+
+    ok, msg = check_limits(uid)
+    if not ok:
+        await update.message.reply_text(msg)
+        return
+
+    if _USER_BUSY.get(uid):
+        await update.message.reply_text("⏳ عندك طلب تحميل قيد التنفيذ، إنتظر رجاءً…")
+        return
+
+    if looks_like_url(text):
+        platform = downloader.detect_platform(text)
+        if not platform:
+            await update.message.reply_text(
+                "🤔 الرابط غير مدعوم. المدعوم حالياً:\nYouTube • Instagram • TikTok • Facebook\n\n"
+                "أو اكتب إسم أغنية للبحث على يوتيوب."
+            )
+            return
+        await start_download(update, context, text, platform, "video")
+    else:
+        await do_search(update, context, text)
+
+
+async def start_download(update, context, url, platform, kind):
+    uid = update.effective_user.id
+    chat_id = update.effective_chat.id
+    status_msg = await update.message.reply_text(
+        f"✅ تم التعرف على الرابط ({platform}).\n⏳ جاري التحضير…",
+    )
+    await schedule_download(
+        bot=context.bot, chat_id=chat_id, uid=uid, url=url,
+        platform=platform, kind=kind, status_id=status_msg.message_id,
+    )
+
+
+async def _vip_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """بطاقة نظام الـ VIP للمستخدمين."""
+    uid = update.effective_user.id
+    u, _ = db.get_or_create_user(uid, update.effective_user.username, update.effective_user.first_name)
+    vip_txt = "✅ أنت عضو VIP 👑" if u["is_vip"] else "❌ لست VIP بعد"
+    bar = vip_bar(u["points"])
+    txt = (
+        "⭐ <b>نظام الـ VIP</b>\n\n"
+        "💠 <b>كيف تصير VIP؟</b>\n"
+        f"• تحميل فيديو ناجح = +{POINTS_PER_VIDEO} نقاط\n"
+        f"• تحميل أغنية ناجحة = +{POINTS_PER_AUDIO} نقاط\n"
+        f"• كل صديق تدعوه ويستخدم البوت = +{POINTS_PER_REFERRAL} نقاط\n"
+        f"• المكافأة اليومية = +{DAILY_REWARD_POINTS} نقاط\n"
+        f"• عند وصولك <b>{VIP_THRESHOLD} نقطة</b> تصبح VIP تلقائياً 🎉\n\n"
+        "👑 <b>مميزات VIP:</b>\n"
+        "✅ استخدام البوت بدون اشتراك إجباري\n"
+        "✅ سرعة تحميل أعلى (أولوية في الطابور)\n"
+        "✅ تحميل بجودة تصل إلى 1080p\n"
+        "✅ حدود تحميل يومية أعلى\n\n"
+        f"📊 <b>نقاطك الحالية:</b> {u['points']}\n"
+        f"{bar}  <code>{u['points']}/{VIP_THRESHOLD}</code>\n"
+        f"👑 الحالة: {vip_txt}"
+    )
+    await update.message.reply_text(
+        txt, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(uid)
+    )
+
+
+async def _discussion_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """زر كروب المناقشة: يرسل رابط الكروب إن كان مفعلاً."""
+    uid = update.effective_user.id
+    link = db.get_setting("discussion_group")
+    enabled = db.get_setting("group_enabled", "0") == "1"
+    if enabled and link:
+        await update.message.reply_text(
+            "💬 <b>كروب المناقشة</b>\n\n"
+            "انضم إلينا وتواصل مع الأعضاء والإدارة 👇\n"
+            f"{link}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_keyboard(uid),
+        )
+    else:
+        await update.message.reply_text(
+            "💬 لم يتم تعيين كروب مناقشة بعد، حاول لاحقاً.",
+            reply_markup=main_keyboard(uid),
+        )
+
+
+async def do_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
+    chat_id = update.effective_chat.id
+    uid = update.effective_user.id
+    status_msg = await update.message.reply_text(
+        f"🔍 جاري البحث عن «<b>{esc(query)}</b>»…", parse_mode=ParseMode.HTML
+    )
+    try:
+        results = await asyncio.to_thread(downloader.search_youtube, query, 5)
+    except Exception as exc:
+        await status_msg.edit_text(f"❌ فشل البحث: {exc}")
+        return
+    if not results:
+        await status_msg.edit_text("😕 لا توجد نتائج. جرب صياغة أخرى.")
+        return
+    _SEARCH_RESULTS[uid] = results
+    lines = [f"🎯 نتائج البحث عن «{esc(query)}»:", ""]
+    kb = []
+    for i, r in enumerate(results):
+        lines.append(f"{i+1}. {esc(r['title'])} — <i>{fmt_duration(r['duration'])}</i>")
+        kb.append([InlineKeyboardButton(f"{i+1}. {r['title'][:40]}", callback_data=f"pick:{i}")])
+    kb.append([InlineKeyboardButton("❌ إلغاء", callback_data="cancel")])
+    await status_msg.edit_text(
+        "\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb),
+    )
