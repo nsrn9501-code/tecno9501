@@ -44,6 +44,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("📥 رسالة من %s: %s", uid, text[:80])
 
     # أزرار النظام
+    if text == "🏠 رجوع":
+        u, _ = db.get_or_create_user(uid, user.username, user.first_name)
+        await update.message.reply_text(
+            "🏠 <b>القائمة الرئيسية</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_keyboard(uid),
+        )
+        return
     if text == "👤 حسابي":
         await send_stats_reply(update, context)
         return
@@ -300,11 +308,15 @@ async def _my_fact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _hide_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """زر إخفاء الأزرار: يخفي لوحة المفاتيح النظامية لإفساح مجال الشاشة."""
+    """زر إخفاء الأزرار: يخفي الأزرار ويترك زر رجوع واحد."""
+    from telegram import ReplyKeyboardMarkup, KeyboardButton
     await update.message.reply_text(
         "🙈 تم إخفاء الأزرار.\n\n"
-        "للإظهار مجدداً اكتب /start أو أرسل أي شيء.",
-        reply_markup=ReplyKeyboardRemove(),
+        "للعودة للقائمة اضغط زر «🏠 رجوع» بالأسفل.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("🏠 رجوع")]],
+            resize_keyboard=True, is_persistent=True,
+        ),
     )
 
 
