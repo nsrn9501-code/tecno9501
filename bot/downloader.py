@@ -106,7 +106,22 @@ def download_video(url, max_height=1080):
     try:
         return _run(platform, url, opts, "video")
     except DownloadError:
-        if platform in ("instagram", "tiktok", "facebook"):
+        if platform == "instagram":
+            # بعض المنصات ترفض دمج الصيغ أو الكوكيز: جرب MP4 متاح (أقل عرضة للملفات التالفة)
+            opts["format"] = "best[ext=mp4]/best"
+            try:
+                return _run(platform, url, opts, "video")
+            except DownloadError:
+                # جرّب أيضاً App IDs مختلفة (يغيّر مسار API وقد يتجاوز تقييد المنصة)
+                for app_id in ("124024574287414", "567067343352427", "3698584747777168"):
+                    try:
+                        trial = dict(opts)
+                        trial["extractor_args"] = {"instagram": {"app_id": [app_id]}}
+                        return _run(platform, url, trial, "video")
+                    except DownloadError:
+                        continue
+                raise
+        if platform in ("tiktok", "facebook"):
             # بعض المنصات ترفض دمج الصيغ أو الكوكيز، جرب MP4 متاح (أقل عرضة للملفات التالفة)
             opts["format"] = "best[ext=mp4]/best"
             return _run(platform, url, opts, "video")
@@ -119,11 +134,18 @@ def _run(platform, url, opts, kind):
             info = ydl.extract_info(url, download=True)
         except Exception as exc:
             err = str(exc)
-            if platform == "instagram" and ("empty media" in err or "login" in err.lower()):
-                raise DownloadError(
-                    "انستغرام يطلب تسجيل دخول حالياً.\n"
-                    "الحل: ضع ملف كوكيز في bot/cookies/instagram.txt أو أرسل رابطاً لحساب عام."
-                )
+            if platform == "instagram":
+                low = err.lower()
+                if "login required" in low or "redirected to the login page" in low or "logged-in" in low or "logged in" in low:
+                    raise DownloadError(
+                        "انستغرام طلب تسجيل دخول حالياً (ضغط مرتفع أو حساب خاص).\n"
+                        "الحل: ضع ملف كوكيز في bot/cookies/instagram.txt أو جرّب رابطاً لحساب عام/عام."
+                    )
+                if "no video" in low or "empty media" in low or "no formats" in low:
+                    raise DownloadError(
+                        "لا يوجد فيديو قابلاً للتحميل في هذا المنشور أو أنه حساب خاص.\n"
+                        "تأكد أن الرابط لمنشور فيديو عام أو جرّب رابطاً آخر."
+                    )
             raise DownloadError(f"فشل التحميل: {err}")
 
     candidates = set()
