@@ -99,48 +99,82 @@ def download_video(url, max_height=1080):
         raise DownloadError("الرابط غير مدعوم.")
     outtmpl = os.path.join(DOWNLOAD_DIR, f"video_{os.getpid()}_%(id)s.%(ext)s")
     opts = _base_opts(platform, outtmpl)
-    # نفضّل فيديو H.264 (avc1) لأنه يدعمه تيليجرام مباشرة، وإلا نأخذ أفضل فيديو
-    # متاح (قد يكون VP9) ثم نحوله. أبداً لا ننزل إلى ملف صوتي فقط في كفيديو.
-    fmt = (f"bestvideo[height<=?{max_height}][vcodec~='^(avc1|h264)']+bestaudio/"
-           f"bestvideo[height<=?{max_height}]+bestaudio/"
-           f"bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
+    # أهم أولوية: صيغة معدنية (مدمجة) واحدة بـ H.264 (avc1) بامتداد mp4 —
+    # لأنها تشتغل في تيليجرام مباشرة بدون تحويل (كما جربناها سابقاً).
+    # وإلا DASH H.264، ثم أي فيديو (يُحوَّل لاحقاً إلى H.264). لا صوت فقط أبداً.
+    fmt = (f"best[vcodec~='^(avc1|h264)'][ext=mp4]"
+           f"/bestvideo[vcodec~='^(avc1|h264)'][ext=mp4][height<=?{max_height}]+bestaudio"
+           f"/bestvideo[ext=mp4][height<=?{max_height}]+bestaudio"
+           f"/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
     opts.update({
         "format": fmt,
         "merge_output_format": "mp4",
         "format_sort": ["res", "vcodec:h264", "ext:mp4:m4a"],
     })
+    if platform == "instagram":
+        # انستغرام: نفضّل الصيغة المعدنية المدمجة H.264 دائماً،
+        # ثم نلجأ للصيغة العامة كحل احتياطي مع إعادة ترميز.
+        return _download_instagram_muxed(url, opts, fmt)
     try:
         return _run(platform, url, opts, "video")
     except DownloadError:
-        if platform == "instagram":
-            # انستغرام كثيراً ما يفرض تقييداً مؤقتاً أو يطلب تسجيل دخول،
-            # لذا نعيد المحاولة بعدة طرق مع مهلة قصيرة بينها.
-            attempts = (
-                # 1) MP4 متاح مباشرة
-                {"format": "best[ext=mp4]/best"},
-                # 2) App IDs مختلفة تغيّر مسار API
-                {"format": fmt, "extractor_args": {"instagram": {"app_id": ["124024574287414"]}}},
-                {"format": "best[ext=mp4]/best", "extractor_args": {"instagram": {"app_id": ["567067343352427"]}}},
-                {"format": "best", "extractor_args": {"instagram": {"app_id": ["3698584747777168"]}}},
-            )
-            last_err = None
-            for i, extra in enumerate(attempts):
-                trial = dict(opts)
-                trial.update(extra)
-                try:
-                    return _run(platform, url, trial, "video")
-                except DownloadError as exc:
-                    last_err = exc
-                    if i < len(attempts) - 1:
-                        time.sleep(2)
-            if last_err:
-                raise last_err
-            raise
         if platform in ("tiktok", "facebook"):
             # بعض المنصات ترفض دمج الصيغ أو الكوكيز، جرب MP4 متاح (أقل عرضة للملفات التالفة)
             opts["format"] = "best[ext=mp4]/best"
             return _run(platform, url, opts, "video")
         raise
+
+
+def _download_instagram_muxed(url, base_opts, fallback_fmt):
+    """انستغرام يعرض غالباً صيغ DASH (VP9 غالباً) + صيغ معدنية مدمجة (H.264/MP4).
+    نفضّل الصيغة المعدنية المدمجة لأنها H.264 وتشتغل في تيليجرام مباشرة."""
+    # 1) افحص الصيغ المتاحة واجمع أي صيغة معدنية مستقلة (غير DASH)
+    explore = dict(base_opts)
+    explore.pop("format", None)
+    with YoutubeDL(explore) as ydl:
+        try:
+            info = ydl.extract_info(url, download=False)
+        except Exception as exc:
+            raise DownloadError(f"تعذر الوصول لرابط انستغرام: {exc}")
+    muxed_ids = []
+    for f in info.get("formats") or []:
+        fid = str(f.get("format_id") or "")
+        # صيغة معدنية: معرّف بدون 'dash' وليست DASH صوت فقط (vcodec قد يكون None)
+        if fid and "dash" not in fid.lower() and f.get("vcodec") != "none" and f.get("acodec") != "none":
+            muxed_ids.append(fid)
+    # ترتيب افتراضي لمقادير الجودة غالباً: الأدنى أولاً، نفضّل الأعلى
+    muxed_ids = sorted(set(muxed_ids), key=lambda x: (len(x), x))
+    muxed_ids = muxed_ids[::-1]  # الأعلى أولاً
+
+    last_err = None
+    for fid in muxed_ids:
+        trial = dict(base_opts)
+        trial["format"] = fid
+        try:
+            return _run_clean(platform="instagram", url=url, opts=trial, kind="video", expected_codec="h264")
+        except DownloadError as exc:
+            last_err = exc
+            time.sleep(1)
+
+    # 2) إن لم تتوفر صيغة معدنية: جرّب سلاسل App ID مختلفة مع الصيغة العامة
+    attempts = (
+        {"format": "best[ext=mp4]/best"},
+        {"format": fallback_fmt, "extractor_args": {"instagram": {"app_id": ["124024574287414"]}}},
+        {"format": "best[ext=mp4]/best", "extractor_args": {"instagram": {"app_id": ["567067343352427"]}}},
+        {"format": "best", "extractor_args": {"instagram": {"app_id": ["3698584747777168"]}}},
+    )
+    for i, extra in enumerate(attempts):
+        trial = dict(base_opts)
+        trial.update(extra)
+        try:
+            return _run_clean(platform="instagram", url=url, opts=trial, kind="video", expected_codec="h264")
+        except DownloadError as exc:
+            last_err = exc
+            if i < len(attempts) - 1:
+                time.sleep(2)
+    if last_err:
+        raise last_err
+    raise DownloadError("تعذر تحميل الفيديو من انستغرام.")
 
 
 def _run(platform, url, opts, kind):
@@ -194,6 +228,28 @@ def _run(platform, url, opts, kind):
         os.remove(path)
         raise DownloadError("الملف أكبر من 50MB ولا يمكن إرساله عبر تيليغرام.")
     return path, info.get("title") if info else None
+
+
+def _run_clean(platform, url, opts, kind, expected_codec):
+    """نسخة من _run لكنها تتحقق أن الفيديو المحمّل بترميز H.264 فعلاً.
+    نستخدمها لانستغرام لنضمن إرسال ملف يدعمه تيليجرام مباشرة."""
+    path, title = _run(platform, url, opts, kind)
+    if expected_codec:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=30,
+        )
+        codec = (probe.stdout or "").strip()
+        if codec != expected_codec:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            raise DownloadError(
+                f"الصيغة المتاحة كانت {codec or 'غير معروفة'} وليست H.264؛ جرّبت صيغة أخرى."
+            )
+    return path, title
 
 
 
