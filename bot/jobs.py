@@ -7,7 +7,7 @@ from telegram import InputFile
 
 from . import db
 from .config import POINTS_PER_AUDIO, POINTS_PER_VIDEO, VIP_THRESHOLD
-from .downloader import DownloadError, cleanup, download_audio, download_video
+from .downloader import DownloadError, cleanup, download_audio, download_video, ensure_telegram_compatible
 from .handlers.system import esc
 from . import state
 from .state import _USER_BUSY
@@ -79,6 +79,11 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             size = os.path.getsize(path)
             try:
                 if kind == "video":
+                    # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4 إن لزم)
+                    try:
+                        path = await asyncio.to_thread(ensure_telegram_compatible, path)
+                    except DownloadError as conv_exc:
+                        logger.warning("تحويل الفيديو فشل: %s", conv_exc)
                     await bot.send_video(
                         chat_id, video=InputFile(path), caption=caption,
                         supports_streaming=True, parse_mode="HTML",
