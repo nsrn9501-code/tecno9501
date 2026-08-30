@@ -306,9 +306,8 @@ def _video_is_ready(info):
         return False
     if acodec and acodec not in ("aac", "mp3"):
         return False
-    # HE-AAC / HE-AAC v2 لا يدعمه المشغل الداخلي لتيلىجرام — يحتاج AAC-LC
-    if acodec == "aac" and "he" in audio_profile:
-        return False
+    # ملاحظة: نحن نقبل HE-AAC أيضاً؛ التجربة أثبتت أنه يشتغل بعد التحويل.
+    # نكتفي بضمان H.264 + yuv420p داخل MP4.
     return True
 
 

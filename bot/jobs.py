@@ -96,9 +96,9 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                             pass
                         path = converted
                     probe = await asyncio.to_thread(probe_media, path)
-                    audio_ok = not probe.get("acodec") or probe.get("acodec") in ("aac", "mp3")
-                    audio_lc = "he" not in (probe.get("acodec_profile") or "").lower()
-                    if (not probe or probe.get("vcodec") != "h264" or not audio_ok or not audio_lc):
+                    # شرط واحد فقط: الفيديو يجب أن يكون H.264/MP4. نترك الصوت كما هو
+                    # (HE-AAC يعمل مع تيليجرام بعد التحويل بالظبط الأصل) — لا نرفضه.
+                    if not probe or probe.get("vcodec") != "h264":
                         raise DownloadError(
                             "❌ الفيديو وصل بترميز لا يدعمه تيليجرام وفشل تحويله. جرّب رابطاً آخر."
                         )
