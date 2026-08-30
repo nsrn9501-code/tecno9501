@@ -84,12 +84,14 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     # لا نرسل الملف الأصلي التالف بل نبلغ المستخدم.
                     try:
                         converted = await asyncio.to_thread(ensure_telegram_compatible, path)
+                        test_note = "🧪 اختبار: النسخة المعبأة (remux H.264/AAC) — هل تشتغل عندك؟"
                     except DownloadError as conv_exc:
                         logger.warning("تحويل الفيديو فشل: %s", conv_exc)
                         raise conv_exc
                     if converted != path:
                         logger.info("✅ تحويل الفيديو إلى صيغة H.264 التي يدعمها تيليجرام: %s", converted)
                         path = converted
+                    caption = f"{caption}\n{test_note}"
                     probe = await asyncio.to_thread(probe_media, path)
                     kwargs = {"supports_streaming": True, "parse_mode": "HTML"}
                     if probe:

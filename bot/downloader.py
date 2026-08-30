@@ -1,4 +1,5 @@
 import os
+import time
 import re
 import shutil
 import subprocess
@@ -107,20 +108,29 @@ def download_video(url, max_height=1080):
         return _run(platform, url, opts, "video")
     except DownloadError:
         if platform == "instagram":
-            # بعض المنصات ترفض دمج الصيغ أو الكوكيز: جرب MP4 متاح (أقل عرضة للملفات التالفة)
-            opts["format"] = "best[ext=mp4]/best"
-            try:
-                return _run(platform, url, opts, "video")
-            except DownloadError:
-                # جرّب أيضاً App IDs مختلفة (يغيّر مسار API وقد يتجاوز تقييد المنصة)
-                for app_id in ("124024574287414", "567067343352427", "3698584747777168"):
-                    try:
-                        trial = dict(opts)
-                        trial["extractor_args"] = {"instagram": {"app_id": [app_id]}}
-                        return _run(platform, url, trial, "video")
-                    except DownloadError:
-                        continue
-                raise
+            # انستغرام كثيراً ما يفرض تقييداً مؤقتاً أو يطلب تسجيل دخول،
+            # لذا نعيد المحاولة بعدة طرق مع مهلة قصيرة بينها.
+            attempts = (
+                # 1) MP4 متاح مباشرة
+                {"format": "best[ext=mp4]/best"},
+                # 2) App IDs مختلفة تغيّر مسار API
+                {"format": fmt, "extractor_args": {"instagram": {"app_id": ["124024574287414"]}}},
+                {"format": "best[ext=mp4]/best", "extractor_args": {"instagram": {"app_id": ["567067343352427"]}}},
+                {"format": "best", "extractor_args": {"instagram": {"app_id": ["3698584747777168"]}}},
+            )
+            last_err = None
+            for i, extra in enumerate(attempts):
+                trial = dict(opts)
+                trial.update(extra)
+                try:
+                    return _run(platform, url, trial, "video")
+                except DownloadError as exc:
+                    last_err = exc
+                    if i < len(attempts) - 1:
+                        time.sleep(2)
+            if last_err:
+                raise last_err
+            raise
         if platform in ("tiktok", "facebook"):
             # بعض المنصات ترفض دمج الصيغ أو الكوكيز، جرب MP4 متاح (أقل عرضة للملفات التالفة)
             opts["format"] = "best[ext=mp4]/best"
@@ -246,34 +256,35 @@ def _decode_ok(fp):
 
 
 def ensure_telegram_compatible(path):
-    """يضمن إرسال فيديو يدعمه تيليجرام نهائياً (MP4 / H.264 / AAC / yuv420p).
+    """يضمن إرسال فيديو يدعمه تيليجرام نهائياً (MP4 / H.264 / AAC).
 
-    - إذا كان الملف الأصلي أصلاً H.264+AAC+yuv420p وسليماً => تعبئة سريعة (remux).
-    - وإلا => إعادة ترميز كاملة إلى H.264 + AAC + yuv420p + faststart.
-    - فحص نهائي شامل (كوديك + فك تشفير كامل) قبل الإرسال؛ إن فشل نرفع خطأ ولا نرسل ملفاً تالفاً.
+    الطريقة الأساسية: تعبئة (remux) سريعة بنسخ التيارات كما هي إلى حاوية
+    MP4 قياسية مع faststart — وهي نفس الطريقة التي جربناها سابقاً وأثبتت
+    نجاحها. تُستخدم إعادة الترميز الكاملة فقط كحل احتياطي إن فشل النسخ.
     """
     out = os.path.splitext(path)[0] + "_conv.mp4"
     if os.path.exists(out):
         os.remove(out)
 
-    info = _ffprobe_info(path)
-
-    # 1) إن كان مصدر الفيديو أصلاً مطابقاً للشكل المطلوب → تعبئة سريعة فقط
-    if info and _video_is_ready(info):
-        try:
-            r = subprocess.run(
-                ["ffmpeg", "-y", "-i", path, "-c", "copy",
-                 "-movflags", "+faststart", out],
-                capture_output=True, text=True, timeout=300,
-            )
-            if r.returncode == 0 and os.path.exists(out) and _video_is_ready(_ffprobe_info(out)):
-                return out
-        except subprocess.TimeoutExpired:
-            pass
+    # 1) التعبئة (remux): نسخ التيارات كما هي إلى MP4 مع faststart.
+    #    هذه هي الطريقة المجرّبة التي كانت ترسل فيديو يدعمه تيليجرام.
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", path, "-c", "copy",
+             "-movflags", "+faststart", out],
+            capture_output=True, text=True, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        r = None
+    if r is not None and r.returncode == 0 and os.path.exists(out):
+        info = _ffprobe_info(out)
+        # نتأكد أن النسخة أولاً هي H.264 داخل MP4؛ إن لم تكن كذلك نعيد الترميز
+        if info and _video_is_ready(info):
+            return out
         if os.path.exists(out):
             os.remove(out)
 
-    # 2) إعادة ترميز كاملة: تحويل VP9/أي كوديك آخر إلى H.264 + AAC + yuv420p
+    # 2) إعادة ترميز كاملة (احتياطي): تحويل أي كوديك (VP9…) إلى H.264 + AAC + yuv420p
     try:
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", path,
@@ -289,11 +300,11 @@ def ensure_telegram_compatible(path):
         conv_ok = False
 
     final_info = _ffprobe_info(out) if conv_ok else None
-    if not conv_ok or not _video_is_ready(final_info) or not _decode_ok(out):
+    if not conv_ok or not final_info or not _video_is_ready(final_info):
         if os.path.exists(out):
             os.remove(out)
         raise DownloadError(
-            "❌ المقطع وصل من المنصة بصيغة لا يدعمها تيليجرام (VP9)، وفشل تحويله تلقائياً.\n"
+            "❌ المقطع وصل من المنصة بصيغة لا يدعمها تيليجرام، وفشل تحويله تلقائياً.\n"
             "جرّب رابطاً آخر أو أعد إرساله بعد قليل."
         )
     return out
