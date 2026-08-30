@@ -79,11 +79,13 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             size = os.path.getsize(path)
             try:
                 if kind == "video":
-                    # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4 إن لزم)
+                    # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4)؛ إن فشل التحويل
+                    # لا نرسل الملف الأصلي التالف بل نبلغ المستخدم.
                     try:
                         path = await asyncio.to_thread(ensure_telegram_compatible, path)
                     except DownloadError as conv_exc:
                         logger.warning("تحويل الفيديو فشل: %s", conv_exc)
+                        raise conv_exc
                     await bot.send_video(
                         chat_id, video=InputFile(path), caption=caption,
                         supports_streaming=True, parse_mode="HTML",
