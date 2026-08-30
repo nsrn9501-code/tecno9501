@@ -137,7 +137,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                             if r.status_code != 200:
                                 logger.error("فشل إرسال الفيديو: %s", r.text[:200])
                                 raise DownloadError(
-                                    "❌ تعذر إرسال الفيديو عبر قناة الرفع. تأكد من ضبطها في لوحة المالك."
+                                    "❌ تعذر إرسال الفيديو عبر قناة الرفع. تأكد من ضبطها في لوحة المطور."
                                 )
                     else:
                         up_kwargs = {}

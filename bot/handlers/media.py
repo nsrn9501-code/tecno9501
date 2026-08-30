@@ -79,7 +79,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in ("🙈 إخفاء الأزرار", "إخفاء الأزرار", "🙈"):
         await _hide_keyboard(update, context)
         return
-    if text in ("👑 المالك", "👑 لوحة المالك"):
+    if text in ("👑 المطور", "👑 لوحة المطور"):
         if uid == OWNER_ID:
             from .owner import cmd_owner
             await cmd_owner(update, context)

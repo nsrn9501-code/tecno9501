@@ -62,14 +62,14 @@ async def cmd_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ هذه اللوحة للمالك فقط.")
         return
     await update.message.reply_text(
-        "👑 <b>لوحة تحكم المالك</b>\nاختر ما تريد:", parse_mode=ParseMode.HTML,
+        "👑 <b>لوحة تحكم المطور</b>\nاختر ما تريد:", parse_mode=ParseMode.HTML,
         reply_markup=owner_keyboard(),
     )
 
 
 async def _send_owner_panel_msg(bot, chat_id):
     await bot.send_message(
-        chat_id, "👑 <b>لوحة تحكم المالك</b>", parse_mode=ParseMode.HTML,
+        chat_id, "👑 <b>لوحة تحكم المطور</b>", parse_mode=ParseMode.HTML,
         reply_markup=owner_keyboard(),
     )
 
@@ -285,7 +285,7 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         db.set_setting("group_enabled", "1")
         await update.message.reply_text(
             f"✅ تم تعيين كروب المناقشة وتشغيله:\n🔗 {text}\n\n"
-            "يمكنك إيقافه أو تغييره لاحقاً من لوحة المالك.",
+            "يمكنك إيقافه أو تغييره لاحقاً من لوحة المطور.",
         )
     elif action == "gift":
         clear_owner_state(uid)

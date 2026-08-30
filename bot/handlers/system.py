@@ -29,7 +29,7 @@ def main_keyboard(user_id):
         [KeyboardButton("🎁 مكافأة يومية"), KeyboardButton("🔗 رابط الدعوة")],
         [KeyboardButton("⭐ نظام الـ VIP"), KeyboardButton("💬 كروب المناقشة")],
         [KeyboardButton("💡 معلومتي"), KeyboardButton("ℹ️ المساعدة")],
-        [KeyboardButton("👑 المالك"), KeyboardButton("🙈 إخفاء الأزرار")],
+        [KeyboardButton("👑 المطور"), KeyboardButton("🙈 إخفاء الأزرار")],
     ]
     return ReplyKeyboardMarkup(
         rows, resize_keyboard=True, is_persistent=True, input_field_placeholder="أرسل رابطاً أو إسم أغنية…"
@@ -56,12 +56,12 @@ def owner_card():
     name = esc(u.get("first_name") or "المالك")
     uname = u.get("username") or "N_S_R01"
     txt = (
-        "👑 <b>لوحة المالك</b>\n\n"
-        f"👑 المالك: @{esc(uname)}\n"
+        "👑 <b>لوحة المطور</b>\n\n"
+        f"👑 المطور: @{esc(uname)}\n"
         "لأي مشكلة أو اقتراح راسله مباشرة من الزر بالأسفل 👇"
     )
     kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✉️ راسل المالك", url=f"https://t.me/{uname}")]]
+        [[InlineKeyboardButton("✉️ راسل المطور", url=f"https://t.me/{uname}")]]
     )
     return txt, kb
 
