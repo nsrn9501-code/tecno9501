@@ -18,7 +18,6 @@ from .system import (
     get_owner_state,
     looks_like_url,
     main_keyboard,
-    back_only_keyboard,
     owner_card,
     send_stats_reply,
     vip_bar,
@@ -45,14 +44,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("📥 رسالة من %s: %s", uid, text[:80])
 
     # أزرار النظام
-    if text == "🏠 رجوع":
-        u, _ = db.get_or_create_user(uid, user.username, user.first_name)
-        await update.message.reply_text(
-            "🏠 <b>القائمة الرئيسية</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=main_keyboard(uid),
-        )
-        return
     if text == "👤 حسابي":
         await send_stats_reply(update, context)
         return
@@ -86,8 +77,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _my_fact(update, context)
         return
     if text in ("🙈 إخفاء الأزرار", "إخفاء الأزرار", "🙈"):
-        await _hide_keyboard(update, context)
-        return
+        return  # تم إلغاء الزر
+    if text == "🏠 رجوع":
+        return  # تم إلغاء الزر
     if text in ("👑 المطور", "👑 لوحة المطور"):
         if uid == OWNER_ID:
             from .owner import cmd_owner
@@ -260,7 +252,7 @@ async def _vip_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👑 الحالة: {vip_txt}"
     )
     await update.message.reply_text(
-        txt, parse_mode=ParseMode.HTML, reply_markup=back_only_keyboard()
+        txt, parse_mode=ParseMode.HTML, reply_markup=_hide_all()
     )
 
 
@@ -275,12 +267,12 @@ async def _discussion_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "انضم إلينا وتواصل مع الأعضاء والإدارة 👇\n"
             f"{link}",
             parse_mode=ParseMode.HTML,
-            reply_markup=back_only_keyboard(),
+            reply_markup=_hide_all(),
         )
     else:
         await update.message.reply_text(
             "💬 لم يتم تعيين كروب مناقشة بعد، حاول لاحقاً.",
-            reply_markup=back_only_keyboard(),
+            reply_markup=_hide_all(),
         )
 
 

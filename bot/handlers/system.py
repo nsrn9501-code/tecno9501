@@ -22,13 +22,12 @@ def fmt_duration(sec):
     return f"{m}:{s:02d}"
 
 
-def back_only_keyboard():
-    """زر رجوع واحد — يظهر بعد كل رد تلقائياً بدلاً من القائمة الكاملة."""
-    from telegram import ReplyKeyboardMarkup, KeyboardButton
-    return ReplyKeyboardMarkup(
-        [[KeyboardButton("🏠 رجوع")]],
-        resize_keyboard=True, is_persistent=True,
-    )
+from telegram import ReplyKeyboardRemove
+
+
+def _hide_all():
+    """إخفاء الأزرار بالكامل — يظهر بعد كل رد."""
+    return ReplyKeyboardRemove()
 
 
 def main_keyboard(user_id):
@@ -38,7 +37,7 @@ def main_keyboard(user_id):
         [KeyboardButton("🎁 مكافأة يومية"), KeyboardButton("🔗 رابط الدعوة")],
         [KeyboardButton("⭐ نظام الـ VIP"), KeyboardButton("💬 كروب المناقشة")],
         [KeyboardButton("💡 معلومتي"), KeyboardButton("ℹ️ المساعدة")],
-        [KeyboardButton("👑 المطور"), KeyboardButton("🙈 إخفاء الأزرار")],
+        [KeyboardButton("👑 المطور")],
     ]
     return ReplyKeyboardMarkup(
         rows, resize_keyboard=True, is_persistent=True, input_field_placeholder="أرسل رابطاً أو إسم أغنية…"

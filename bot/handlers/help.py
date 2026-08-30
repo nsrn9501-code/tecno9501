@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 from .. import db
 from ..config import DAILY_REWARD_POINTS, POINTS_PER_AUDIO, POINTS_PER_REFERRAL, POINTS_PER_VIDEO, VIP_THRESHOLD
-from .system import back_only_keyboard
+from .system import _hide_all
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -36,7 +36,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     uid = update.effective_user.id
     await update.message.reply_text(
-        txt, parse_mode=ParseMode.HTML, reply_markup=back_only_keyboard()
+        txt, parse_mode=ParseMode.HTML, reply_markup=_hide_all()
     )
 
 
@@ -69,5 +69,5 @@ async def cmd_referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• كلما زادت نقاطك اقتربت من رتبة <b>VIP</b> 👑"
     )
     await update.message.reply_text(
-        txt, parse_mode=ParseMode.HTML, reply_markup=back_only_keyboard()
+        txt, parse_mode=ParseMode.HTML, reply_markup=_hide_all()
     )
