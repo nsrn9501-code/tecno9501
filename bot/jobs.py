@@ -172,11 +172,14 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     "✅ أولوية أعلى في التحميل",
                 )
             fact_label, fact_text = next_fact(uid)
+            # تأخير بسيط: ننتظر حتى يصل الفيديو للمستخدم أولاً
+            await asyncio.sleep(2)
             # تقرير النقاط: رسالة مستقلة
             uploader.edit_message_text(chat_id, status_id,
                 f"✅ تم التحميل!\n⭐ +{points} نقطة (نقاطك الآن: {now.get('points', 0)})")
             # المعلومة: رسالة منفصلة تماماً
             try:
+                await asyncio.sleep(1)
                 uploader.send_message(
                     chat_id,
                     f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}"
