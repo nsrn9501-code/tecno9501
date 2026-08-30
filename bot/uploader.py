@@ -105,12 +105,21 @@ def send_video_by_file_id(chat_id, file_id, caption, duration=0, width=0, height
     return requests.post(f"{API}/sendVideo", data=data, timeout=120)
 
 
-def copy_message(from_chat_id, to_chat_id, message_id):
+def copy_message(from_chat_id, to_chat_id, message_id, caption=None):
     """ينسخ رسالة (فيديو) من قناة إلى المستخدم بدون شريط Forwarded —
-    يبقي الملف المعالج من سيرفر تيليجرام فيعمل المشغل الداخلي."""
+    يبقي الملف المعالج من سيرفر تيليجرام فيعمل المشغل الداخلي.
+    إذا أُعطي caption، يُستخدم بدلاً من كابشن الأصل (معلومات المستخدم لا تظهر)."""
+    data = {
+        "chat_id": to_chat_id,
+        "from_chat_id": from_chat_id,
+        "message_id": message_id,
+    }
+    if caption is not None:
+        data["caption"] = caption
+        data["parse_mode"] = "HTML"
     return requests.post(
         f"{API}/copyMessage",
-        data={"chat_id": to_chat_id, "from_chat_id": from_chat_id, "message_id": message_id},
+        data=data,
         timeout=120,
     )
 

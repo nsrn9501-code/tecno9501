@@ -125,8 +125,9 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                             channel_id, path, chan_caption, **up_kwargs
                         )
                         if chan_mid:
-                            # ارفع للفيديو للمستخدم عبر copyMessage
-                            cpy = uploader.copy_message(channel_id, chat_id, chan_mid)
+                            # ارفع الفيديو للمستخدم بـ copyMessage (بدون metadata للمستخدم)
+                            # clean_caption = بدون اسم مستخدم أو أيدي أو حجم
+                            cpy = uploader.copy_message(channel_id, chat_id, chan_mid, caption=caption)
                             sent_ok = (cpy.status_code == 200)
                         else:
                             sent_ok = False
@@ -171,9 +172,17 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     "✅ أولوية أعلى في التحميل",
                 )
             fact_label, fact_text = next_fact(uid)
+            # تقرير النقاط: رسالة مستقلة
             uploader.edit_message_text(chat_id, status_id,
-                f"✅ تم!\n⭐ +{points} نقطة (نقاطك: {now.get('points', 0)})\n\n"
-                f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}")
+                f"✅ تم التحميل!\n⭐ +{points} نقطة (نقاطك الآن: {now.get('points', 0)})")
+            # المعلومة: رسالة منفصلة تماماً
+            try:
+                uploader.send_message(
+                    chat_id,
+                    f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}"
+                )
+            except Exception:
+                pass
         except asyncio.TimeoutError:
             logger.warning("⏱️ انتهت مهلة التحميل")
             try:
