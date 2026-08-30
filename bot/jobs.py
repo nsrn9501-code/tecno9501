@@ -24,7 +24,9 @@ def enqueue(user_id, coro):
 
 async def queue_worker(app):
     """Processes download jobs; exits when the application stops."""
-    while app.running:
+    # لا نعتمد على app.running لأنه يكون False وقت post_init،
+    # فيخرج العامل فوراً ولا يعالج أي مهمة. نتوقف فقط عند إلغاء المهمة.
+    while True:
         try:
             _prio, _seq, coro = await asyncio.wait_for(state._job_queue.get(), timeout=0.5)
             try:
