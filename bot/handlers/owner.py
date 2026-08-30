@@ -45,6 +45,10 @@ def owner_keyboard():
                 InlineKeyboardButton("🚫 حظر / فك", callback_data="own:ban"),
             ],
             [
+                InlineKeyboardButton("⭐ منح VIP", callback_data="own:grant_vip"),
+                InlineKeyboardButton("🚫 إلغاء VIP", callback_data="own:revoke_vip"),
+            ],
+            [
                 InlineKeyboardButton("🎁 رابط هدية", callback_data="own:gift"),
                 InlineKeyboardButton("👥 أفضل المستخدمين", callback_data="own:top"),
             ],
@@ -287,6 +291,20 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"✅ تم تعيين كروب المناقشة وتشغيله:\n🔗 {text}\n\n"
             "يمكنك إيقافه أو تغييره لاحقاً من لوحة المطور.",
         )
+    elif action == "grant_vip":
+        set_owner_state(uid, "grant_vip")
+        await q.message.reply_text(
+            "⭐ أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لترقيته إلى VIP.
+"
+            "لإلغاء: /cancel"
+        )
+    elif action == "revoke_vip":
+        set_owner_state(uid, "revoke_vip")
+        await q.message.reply_text(
+            "🚫 أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لإلغاء الـ VIP.
+"
+            "لإلغاء: /cancel"
+        )
     elif action == "gift":
         clear_owner_state(uid)
         # format: <max_uses> [points]
@@ -311,6 +329,62 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "رابط يعمل فقط لعدد الاستخدامات المحددة وبعدها يتعطل تلقائياً.",
             parse_mode=ParseMode.HTML,
         )
+    elif action in ("grant_vip", "revoke_vip"):
+        clear_owner_state(uid)
+        target_id = None
+        raw = text.strip()
+        if raw.isdigit():
+            target_id = int(raw)
+        elif raw.startswith("@") and update.message.reply_to_message is None:
+            users = db.all_users()
+            for u_item in users:
+                if (u_item["username"] or "").lower() == raw[1:].lower():
+                    target_id = u_item["id"]
+                    break
+        elif update.message.reply_to_message:
+            target_id = update.message.reply_to_message.from_user.id
+        if not target_id:
+            await update.message.reply_text("❌ لم أجد المستخدم. أرسل ID أو @يوزرنيم أو رد على رسالته.")
+            return
+        u = db.get_user(target_id)
+        if not u:
+            await update.message.reply_text(f"❌ المستخدم <code>{target_id}</code> غير موجود في قاعدة البيانات.", parse_mode="HTML")
+            return
+        if action == "grant_vip":
+            if u["is_vip"]:
+                await update.message.reply_text(f"ℹ️ المستخدم <code>{target_id}</code> عضو VIP أصلاً.", parse_mode="HTML")
+                return
+            db.set_vip(target_id, 1)
+            await update.message.reply_text(
+                f"⭐ تم ترقية <code>{target_id}</code> إلى VIP 👑
+"
+                f"📛 {esc(u.get('first_name') or 'مستخدم')} (@{esc(u.get('username') or '-')})",
+                parse_mode="HTML"
+            )
+            try:
+                await context.bot.send_message(target_id, "🎉 مبروك! تم ترقيتك إلى عضو <b>VIP</b> 👑
+✅ استخدام البوت بدون اشتراك إجباري
+✅ جودة 1080p
+✅ حدود أعلى", parse_mode="HTML")
+            except Exception:
+                pass
+        else:
+            if not u["is_vip"]:
+                await update.message.reply_text(f"ℹ️ المستخدم <code>{target_id}</code> ليس عضو VIP.", parse_mode="HTML")
+                return
+            db.set_vip(target_id, 0)
+            await update.message.reply_text(
+                f"🚫 تم إلغاء VIP من <code>{target_id}</code>
+"
+                f"📛 {esc(u.get('first_name') or 'مستخدم')} (@{esc(u.get('username') or '-')})",
+                parse_mode="HTML"
+            )
+            try:
+                await context.bot.send_message(target_id, "⚠️ تم إلغاء عضويتك <b>VIP</b>.")
+            except Exception:
+                pass
+        return
+
     elif action == "ban":
         clear_owner_state(uid)
         target_id = None
