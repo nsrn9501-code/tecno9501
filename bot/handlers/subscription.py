@@ -10,6 +10,8 @@ from ..state import _LAST_OWNER_NOTIFY
 
 async def sub_status(bot, user_id):
     """يعيد 'ok' أو سلسلة تشير لعدم الاشتراك."""
+    if user_id == OWNER_ID:
+        return "ok"
     channel_id = db.get_setting("channel_id")
     if not channel_id:
         return "ok"

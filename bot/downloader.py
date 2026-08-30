@@ -183,86 +183,94 @@ def _run(platform, url, opts, kind):
 
 
 
-def ensure_telegram_compatible(path):
-    """يضمن أن الفيديو يُرسل بصيغة يدعمها تيليجرام (MP4 / H.264 / AAC / yuv420p).
+def _ffprobe_info(fp):
+    """يعيد معلومات الملف JSON عبر ffprobe، أو None عند الخطأ."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "format=duration:stream=codec_name,codec_type,width,height,pix_fmt,codec_tag_string,profile",
+         "-of", "json", fp],
+        capture_output=True, text=True, timeout=30,
+    )
+    if r.returncode != 0:
+        return None
+    try:
+        return __import__("json").loads(r.stdout)
+    except Exception:
+        return None
 
-    الخطوات:
-    1) تعبئة سريعة (remux) ثم فحص دقيق للناتج: إن كان H.264 + AAC + yuv420p
-       وسليماً (مدة وعرض وارتفاع صحيحة) نستخدمه كما هو.
-    2) إن لم يكن سليماً → إعادة ترميز كاملة إلى H.264 + AAC (yuv420p + faststart).
-    3) فحص الناتج النهائي؛ إن كان تالفاً نرفع DownloadError بدل إرسال ملف مكسور.
+
+def _video_is_ready(info):
+    """هل الملف فيديو H.264 + AAC يدعمه تيليجرام بشكل مضمون؟"""
+    if not info:
+        return False
+    fmt = info.get("format") or {}
+    try:
+        dur = float(fmt.get("duration") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    if dur <= 0:
+        return False
+    vcodec = acodec = None
+    width = height = 0
+    pix_fmt = None
+    for st in info.get("streams", []):
+        if st.get("codec_type") == "video":
+            vcodec = st.get("codec_name")
+            width = st.get("width") or 0
+            height = st.get("height") or 0
+            pix_fmt = st.get("pix_fmt")
+        elif st.get("codec_type") == "audio" and not acodec:
+            acodec = st.get("codec_name")
+    if vcodec != "h264" or not width or not height:
+        return False
+    if pix_fmt not in ("yuv420p", "yuvj420p"):
+        return False
+    if acodec and acodec not in ("aac", "mp3"):
+        return False
+    return True
+
+
+def _decode_ok(fp):
+    """يفك تشفير الفيديو كاملاً بلا أخطاء: يتأكد ألا يكون الملف تالفاً/ناقصاً."""
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", fp, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=600,
+        )
+        return r.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def ensure_telegram_compatible(path):
+    """يضمن إرسال فيديو يدعمه تيليجرام نهائياً (MP4 / H.264 / AAC / yuv420p).
+
+    - إذا كان الملف الأصلي أصلاً H.264+AAC+yuv420p وسليماً => تعبئة سريعة (remux).
+    - وإلا => إعادة ترميز كاملة إلى H.264 + AAC + yuv420p + faststart.
+    - فحص نهائي شامل (كوديك + فك تشفير كامل) قبل الإرسال؛ إن فشل نرفع خطأ ولا نرسل ملفاً تالفاً.
     """
     out = os.path.splitext(path)[0] + "_conv.mp4"
     if os.path.exists(out):
         os.remove(out)
 
-    def _ffprobe_info(fp):
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries",
-             "format=duration:stream=codec_name,codec_type,width,height,pix_fmt,codec_tag_string",
-             "-of", "json", fp],
-            capture_output=True, text=True, timeout=30,
-        )
-        if r.returncode != 0:
-            return None
+    info = _ffprobe_info(path)
+
+    # 1) إن كان مصدر الفيديو أصلاً مطابقاً للشكل المطلوب → تعبئة سريعة فقط
+    if info and _video_is_ready(info):
         try:
-            return __import__("json").loads(r.stdout)
-        except Exception:
-            return None
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-i", path, "-c", "copy",
+                 "-movflags", "+faststart", out],
+                capture_output=True, text=True, timeout=300,
+            )
+            if r.returncode == 0 and os.path.exists(out) and _video_is_ready(_ffprobe_info(out)):
+                return out
+        except subprocess.TimeoutExpired:
+            pass
+        if os.path.exists(out):
+            os.remove(out)
 
-    def _video_ok(info):
-        """فحص شامل: هل الملف فيديو MP4 سليم يدعمه تيليجرام؟"""
-        if not info:
-            return False
-        fmt = info.get("format") or {}
-        try:
-            dur = float(fmt.get("duration") or 0)
-        except (TypeError, ValueError):
-            dur = 0
-        if dur <= 0:
-            return False
-        vcodec = acodec = None
-        width = height = 0
-        pix_fmt = None
-        tag = None
-        for st in info.get("streams", []):
-            if st.get("codec_type") == "video":
-                vcodec = st.get("codec_name")
-                width = st.get("width") or 0
-                height = st.get("height") or 0
-                pix_fmt = st.get("pix_fmt")
-                tag = (st.get("codec_tag_string") or "").lower()
-            elif st.get("codec_type") == "audio" and not acodec:
-                acodec = st.get("codec_name")
-        if vcodec != "h264" or not width or not height:
-            return False
-        if pix_fmt not in ("yuv420p", "yuvj420p"):
-            return False
-        if acodec and acodec not in ("aac", "mp3"):
-            return False
-        # تيليجرام يقبل avc1; بعض الملفات تأتي بوسم hvc1/mp4v أو بدون وسم سليم
-        if tag and tag not in ("avc1", "isom", "mp42", "mp41", ""):
-            return False
-        return True
-
-    # 1) محاولة النسخ المباشر (remux): سريع إن كان الملف سليماً أصلاً
-    try:
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-i", path, "-c", "copy",
-             "-movflags", "+faststart", out],
-            capture_output=True, text=True, timeout=300,
-        )
-        remux_ok = r.returncode == 0 and os.path.exists(out)
-    except subprocess.TimeoutExpired:
-        remux_ok = False
-
-    if remux_ok and _video_ok(_ffprobe_info(out)):
-        return out
-    if os.path.exists(out):
-        os.remove(out)
-
-    # 2) إعادة ترميز كاملة إلى H.264 + AAC + yuv420p + faststart
-    #    (يصلح الملفات التالفة/الناقصة وأكواد البكسل غير المدعومة من انستغرام)
+    # 2) إعادة ترميز كاملة: تحويل VP9/أي كوديك آخر إلى H.264 + AAC + yuv420p
     try:
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", path,
@@ -276,11 +284,13 @@ def ensure_telegram_compatible(path):
     except subprocess.TimeoutExpired:
         conv_ok = False
 
-    if not conv_ok or not _video_ok(_ffprobe_info(out)):
+    final_info = _ffprobe_info(out) if conv_ok else None
+    if not conv_ok or not _video_is_ready(final_info) or not _decode_ok(out):
         if os.path.exists(out):
             os.remove(out)
         raise DownloadError(
-            "❌ المقطع وصل ناقصاً أو تالفاً من المنصة ولا يمكن إصلاحه. جرّب رابطاً آخر أو أعد إرسال الرابط بعد قليل."
+            "❌ المقطع وصل من المنصة بصيغة لا يدعمها تيليجرام (VP9)، وفشل تحويله تلقائياً.\n"
+            "جرّب رابطاً آخر أو أعد إرساله بعد قليل."
         )
     return out
 

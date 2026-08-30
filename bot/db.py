@@ -1,7 +1,7 @@
 import sqlite3
 from contextlib import contextmanager
 
-from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, POINTS_PER_REFERRAL, VIP_THRESHOLD
+from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, OWNER_ID, POINTS_PER_REFERRAL, VIP_THRESHOLD
 
 
 def get_conn():
@@ -363,6 +363,8 @@ def usage_limit(uid, usage_type):
 
 def can_use(uid, usage_type):
     """(ok, msg) — يفحص الحد اليومي للروابط أو البحث."""
+    if uid == OWNER_ID:
+        return True, ""
     limit = usage_limit(uid, usage_type)
     used = usage_today(uid, usage_type)
     if used >= limit:
@@ -402,6 +404,8 @@ def clear_rate_ban(user_id):
 
 def get_rate_ban(user_id):
     """يعيد (متبقي_ثواني) أو 0 إن لم يكن مقيّداً."""
+    if user_id == OWNER_ID:
+        return 0
     with cursor() as conn:
         row = conn.execute("SELECT until FROM rate_bans WHERE user_id=?", (user_id,)).fetchone()
     if not row:

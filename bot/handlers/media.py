@@ -130,33 +130,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg)
             return
 
-        # 2) كشف الغش: 3 روابط خلال دقيقة أو إعادة نفس الرابط
-        now = time.time()
-        norm = db._normalize_url(text)
-        rec = _RATE_URLS.setdefault(uid, {"times": [], "recent_urls": {}})
-        rec["times"] = [t for t in rec["times"] if now - t <= RATE_WINDOW_SECONDS]
-        rec["times"].append(now)
-        prev_dup = rec["recent_urls"].get(norm)
-        rec["recent_urls"] = {u: t for u, t in rec["recent_urls"].items() if now - t <= RATE_WINDOW_SECONDS}
-        rec["recent_urls"][norm] = now
-        if prev_dup is not None:
-            db.set_rate_ban(uid, RATE_BAN_SECONDS)
-            await update.message.reply_text(
-                "⛔ <b>تم تقييدك مؤقتاً لمدة 30 دقيقة!</b>\n"
-                "🔄 أرسلت نفس الرابط أكثر من مرة، وهذا يُعتبر غشاً في النقاط.\n"
-                "🔇 انتظر انتهاء المدة ثم حاول مجدداً.",
-                parse_mode="HTML",
-            )
-            return
-        if len(rec["times"]) >= RATE_MAX_LINKS:
-            db.set_rate_ban(uid, RATE_BAN_SECONDS)
-            await update.message.reply_text(
-                "⛔ <b>تم تقييدك مؤقتاً لمدة 30 دقيقة!</b>\n"
-                "🚀 أرسلت أكثر من 3 روابط خلال دقيقة واحدة.\n"
-                "🔇 انتظر انتهاء المدة ثم حاول مجدداً.",
-                parse_mode="HTML",
-            )
-            return
+        # 2) كشف الغش: 3 روابط خلال دقيقة أو إعادة نفس الرابط (الماالك معفى)
+        if uid != OWNER_ID:
+            now = time.time()
+            norm = db._normalize_url(text)
+            rec = _RATE_URLS.setdefault(uid, {"times": [], "recent_urls": {}})
+            rec["times"] = [t for t in rec["times"] if now - t <= RATE_WINDOW_SECONDS]
+            rec["times"].append(now)
+            prev_dup = rec["recent_urls"].get(norm)
+            rec["recent_urls"] = {u: t for u, t in rec["recent_urls"].items() if now - t <= RATE_WINDOW_SECONDS}
+            rec["recent_urls"][norm] = now
+            if prev_dup is not None:
+                db.set_rate_ban(uid, RATE_BAN_SECONDS)
+                await update.message.reply_text(
+                    "⛔ <b>تم تقييدك مؤقتاً لمدة 30 دقيقة!</b>\n"
+                    "🔄 أرسلت نفس الرابط أكثر من مرة، وهذا يُعتبر غشاً في النقاط.\n"
+                    "🔇 انتظر انتهاء المدة ثم حاول مجدداً.",
+                    parse_mode="HTML",
+                )
+                return
+            if len(rec["times"]) >= RATE_MAX_LINKS:
+                db.set_rate_ban(uid, RATE_BAN_SECONDS)
+                await update.message.reply_text(
+                    "⛔ <b>تم تقييدك مؤقتاً لمدة 30 دقيقة!</b>\n"
+                    "🚀 أرسلت أكثر من 3 روابط خلال دقيقة واحدة.\n"
+                    "🔇 انتظر انتهاء المدة ثم حاول مجدداً.",
+                    parse_mode="HTML",
+                )
+                return
 
         await start_download(update, context, text, platform, "video")
     else:
