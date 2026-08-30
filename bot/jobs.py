@@ -47,6 +47,51 @@ async def queue_worker(app):
             logger.error("Queue error:\n%s", traceback.format_exc())
             await asyncio.sleep(0.5)
 
+def _is_network_error(exc_msg):
+    """يتحقق إذا كان الخطأ بسبب مشكلة شبكة مؤقتة (DNS, timeout, connection)."""
+    low = str(exc_msg).lower()
+    keywords = [
+        "failed to resolve", "temporary failure in name resolution",
+        "name or service not known", "getaddrinfo failed",
+        "connection refused", "connection reset", "connection timed out",
+        "timed out", "timeout", "network is unreachable",
+        "temporary failure", "errno -3", "errno -2",
+        "max retries exceeded", "httpconnectionpool",
+        "urllib3.exceptions", "httpx.connecterror", "httpx.connect",
+        "transporterror",
+    ]
+    return any(k in low for k in keywords)
+
+
+_MAX_RETRIES = 3
+_RETRY_DELAY = [5, 10, 20]  # ثوانٍ بين كل محاولة
+
+
+async def _retry_download(download_fn, *args, timeout=150, **kwargs):
+    """ينفذ عملية التحميل مع إعادة محاولة تلقائية عند أخطاء الشبكة.
+    كل محاولة لها مهلة كاملة خاصة بها بدل مهلة مركزية."""
+    last_err = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(download_fn, *args, **kwargs), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise
+        except Exception as exc:
+            if _is_network_error(str(exc)) and attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_DELAY[min(attempt, len(_RETRY_DELAY)-1)]
+                logger.warning(
+                    "🔄 خطأ شبكة (محاولة %d/%d): %s — إعادة المحاولة بعد %d ثانية",
+                    attempt+1, _MAX_RETRIES, str(exc)[:100], delay
+                )
+                last_err = exc
+                await asyncio.sleep(delay)
+            else:
+                raise
+    raise last_err
+
+
 async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id, max_height=None):
     """جدولة تحميل + رفع للتيليغرام. kind = 'audio' | 'video'."""
     _USER_BUSY[uid] = True
@@ -62,9 +107,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             # منصات التواصل أسرع فشلاً إن كانت الشبكة/المنصة تمنع الطلب
             timeout = 150 if platform in ("instagram", "tiktok", "facebook") else 300
             if kind == "audio":
-                path, title = await asyncio.wait_for(
-                    asyncio.to_thread(download_audio, url), timeout=timeout
-                )
+                path, title = await _retry_download(download_audio, url, timeout=timeout)
             else:
                 u = db.get_user(uid)
                 # جودة مختارة يدوياً: تحترمها دائماً، وإلا فـ 1080 لـ VIP و720 للعادي
@@ -72,9 +115,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     max_h = max_height
                 else:
                     max_h = 1080 if (u and u["is_vip"]) else 720
-                path, title = await asyncio.wait_for(
-                    asyncio.to_thread(download_video, url, max_h), timeout=timeout
-                )
+                path, title = await _retry_download(download_video, url, max_h, timeout=timeout)
 
             icon = "🎵" if kind == "audio" else "🎬"
             caption = f"{icon} <b>{esc(title or 'وسائط')}</b>\n<i>via {platform}</i>"
