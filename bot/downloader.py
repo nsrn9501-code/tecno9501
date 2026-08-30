@@ -162,52 +162,71 @@ def _run(platform, url, opts, kind):
 
 
 def ensure_telegram_compatible(path):
-    """يتأكد أن ملف الفيديو متوافق مع تيليجرام (H.264 + AAC داخل MP4).
-    يعيد مسار الملف المتوافق. إذا كان الملف صالحاً يُعيده كما هو."""
-    try:
-        probe = subprocess.run(
+    """يعيد تعبئة الفيديو عبر ffmpeg إلى MP4 قياسي (H.264 + AAC + faststart)
+    لضمان تشغيله في تيليجرام. إن كان يحتاج ترميزاً فعلياً يعيد ترميزه.
+    يعيد مسار الملف المتوافق (النسخة الجديدة)."""
+    out = os.path.splitext(path)[0] + "_conv.mp4"
+    if os.path.exists(out):
+        os.remove(out)
+
+    def _ffprobe_streams(fp):
+        r = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries",
-             "stream=codec_name,codec_type", "-of", "csv=p=0", path],
+             "stream=codec_name,codec_type", "-of", "csv=p=0", fp],
             capture_output=True, text=True, timeout=30,
         )
-        if probe.returncode != 0:
-            raise DownloadError("تعذر فحص الفيديو (ffprobe).")
-        lines = [l.strip() for l in probe.stdout.splitlines() if l.strip()]
+        if r.returncode != 0:
+            return None
+        return [l.strip() for l in r.stdout.splitlines() if l.strip()]
+
+    def _stream_info(lines):
         vcodec = None
-        has_audio = False
-        for l in lines:
+        acodec = None
+        for l in lines or []:
             parts = l.split(",")
             if len(parts) >= 2:
-                ctype, cname = parts[0], parts[1]
-                if ctype == "video" and cname:
-                    vcodec = cname
-                if ctype == "audio":
-                    has_audio = True
-        # نسخة H.264 + (مع أو بدون صوت) داخل MP4 تعمل مباشرة
-        if vcodec == "h264":
-            return path
-    except subprocess.TimeoutExpired:
-        raise DownloadError("انتهت مهلة فحص الفيديو.")
-    except Exception:
-        pass
+                if parts[0] == "video" and parts[1]:
+                    vcodec = parts[1]
+                elif parts[0] == "audio" and parts[1]:
+                    acodec = parts[1]
+        return vcodec, acodec
 
-    # وإلا نحول إلى MP4 (H.264 + AAC) عبر ffmpeg
-    out = os.path.splitext(path)[0] + "_conv.mp4"
-    cmd = [
-        "ffmpeg", "-y", "-i", path,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-    ]
-    # إذا كان هناك صوت نحوله، وإلا نزيل الصوت
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out]
+    # 1) محاولة النسخ المباشر (remux): سريع جداً ويُصلح metadata غير المعيارية
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", path, "-c", "copy",
+             "-movflags", "+faststart", out],
+            capture_output=True, text=True, timeout=300,
+        )
     except subprocess.TimeoutExpired:
-        raise DownloadError("انتهت مهلة التحويل (ffmpeg).")
+        raise DownloadError("انتهت مهلة تعبئة الفيديو (ffmpeg).")
+    remux_ok = r.returncode == 0 and os.path.exists(out)
+
+    if remux_ok:
+        vcodec, acodec = _stream_info(_ffprobe_streams(out))
+        audio_ok = not acodec or acodec in ("aac", "mp3", "none")
+        if vcodec == "h264" and audio_ok:
+            return out
+        # النسخة المرمزة غير مدعومة → ترميز حقيقي
+        os.remove(out)
+
+    # 2) إعادة ترميز كاملة إلى H.264 + AAC
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", path,
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             "-c:a", "aac", "-b:a", "128k",
+             "-movflags", "+faststart", out],
+            capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        raise DownloadError("انتهت مهلة تحويل الفيديو (ffmpeg).")
     if r.returncode != 0 or not os.path.exists(out):
         if os.path.exists(out):
             os.remove(out)
         raise DownloadError("فشل تحويل الفيديو إلى صيغة يدعمها تيليجرام.")
     return out
+
 
 def cleanup(path):
     if path and os.path.exists(path):
