@@ -89,6 +89,10 @@ def stats_text(u, daily):
         f"🎵 صوتيات: {u['audio_downloads']}  🎬 فيديو: {u['video_downloads']}",
         f"👥 عدد دعواتك: {u['referrals']}",
         f"🗓 تحميلات اليوم: {daily['total']} (صوتي {daily['audio']} / فيديو {daily['video']})",
+        "",
+        "📊 <b>حدود اليوم:</b>",
+        f"🔗 روابط: {db.usage_today(u['id'], 'link')}/{db.usage_limit(u['id'], 'link')}",
+        f"🔍 بحث: {db.usage_today(u['id'], 'search')}/{db.usage_limit(u['id'], 'search')}",
     ]
     return "\n".join(lines)
 

@@ -142,20 +142,39 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if text.strip().lower() == "remove":
             db.set_setting("daily_limit_free", str(DAILY_LIMIT_FREE))
             db.set_setting("daily_limit_vip", str(DAILY_LIMIT_VIP))
+            db.set_setting("daily_link_limit_free", "5")
+            db.set_setting("daily_link_limit_vip", "15")
+            db.set_setting("daily_search_limit_free", "5")
+            db.set_setting("daily_search_limit_vip", "15")
             await update.message.reply_text("✅ تمت إعادة الحدود الافتراضية.")
             return
         parts = text.split()
-        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            free_l, vip_l = int(parts[0]), int(parts[1])
+            db.set_setting("daily_link_limit_free", str(free_l))
+            db.set_setting("daily_link_limit_vip", str(vip_l))
             await update.message.reply_text(
-                "❌ الصيغة غير صحيحة.\nأرسل: <code>الحدود 10 50</code> (عادي VIP)",
+                f"✅ تم تحديث حد الروابط اليومي:\n• عادي: <b>{free_l}</b>\n• VIP: <b>{vip_l}</b>",
                 parse_mode=ParseMode.HTML,
             )
             return
-        free_l, vip_l = int(parts[0]), int(parts[1])
-        db.set_setting("daily_limit_free", str(free_l))
-        db.set_setting("daily_limit_vip", str(vip_l))
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            link_f, link_v, s_f, s_v = map(int, parts)
+            db.set_setting("daily_link_limit_free", str(link_f))
+            db.set_setting("daily_link_limit_vip", str(link_v))
+            db.set_setting("daily_search_limit_free", str(s_f))
+            db.set_setting("daily_search_limit_vip", str(s_v))
+            await update.message.reply_text(
+                f"✅ تم تحديث الحدود اليومية:\n🔗 عادي روابط: <b>{link_f}</b> | VIP: <b>{link_v}</b>\n"
+                f"🔍 عادي بحث: <b>{s_f}</b> | VIP: <b>{s_v}</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
         await update.message.reply_text(
-            f"✅ تم تحديث الحدود اليومية:\n• عادي: <b>{free_l}</b> تحميل\n• VIP: <b>{vip_l}</b> تحميل",
+            "❌ الصيغة غير صحيحة.\nأرسل: <code>الحدود 5 15 5 15</code>\n"
+            "(روابط عادي، روابط VIP، بحث عادي، بحث VIP)\n"
+            "أو <code>الحدود 5 15</code> لتحديد الروابط فقط.\n"
+            "أو <code>remove</code> لإعادة الافتراضي.",
             parse_mode=ParseMode.HTML,
         )
     elif action == "channel":
@@ -405,7 +424,9 @@ async def owner_cb(q, context, action, uid, chat_id):
         set_owner_state(uid, "limits")
         await q.message.reply_text(
             "📥 لتعديل الحدود اليومية أرسل رسالة نصها:\n"
-            "<code>الحدود 10 50</code> (عادي VIP)\n"
+            "<code>الحدود 5 15 5 15</code>\n"
+            "(روابط عادي، روابط VIP، بحث عادي، بحث VIP)\n"
+            "أو <code>الحدود 5 15</code> لتحديد الروابط فقط.\n"
             "أو أرسل <code>remove</code> لإعادة الافتراضي.\n"
             "لإلغاء: /cancel",
             parse_mode=ParseMode.HTML,

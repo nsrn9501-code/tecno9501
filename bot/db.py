@@ -89,6 +89,21 @@ def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                user_id INTEGER,
+                usage_date TEXT,
+                usage_type TEXT,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, usage_date, usage_type)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS rate_bans (
+                user_id INTEGER PRIMARY KEY,
+                until REAL
+            )
+        ''')
         # migration: add downloads detail columns if missing
         cols = [r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()]
         if "title" not in cols:
@@ -102,6 +117,10 @@ def init_db():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_url', '')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_limit_free', '3')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_limit_vip', '20')")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_free', '5')")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_vip', '15')")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_free', '5')")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_vip', '15')")
 
 
 # ---- users ----
@@ -310,3 +329,85 @@ def set_vip(user_id, status):
 def set_banned(user_id, status):
     with cursor() as conn:
         conn.execute("UPDATE users SET is_banned=? WHERE id=?", (1 if status else 0, user_id))
+
+
+# ---- حدود التحميل اليومية: روابط / بحث ----
+def usage_today(user_id, usage_type):
+    with cursor() as conn:
+        row = conn.execute(
+            "SELECT count FROM daily_usage WHERE user_id=? AND usage_date=date('now','localtime') AND usage_type=?",
+            (user_id, usage_type),
+        ).fetchone()
+        return row["count"] if row else 0
+
+
+def increment_usage(user_id, usage_type):
+    with cursor() as conn:
+        conn.execute("""
+            INSERT INTO daily_usage (user_id, usage_date, usage_type, count)
+            VALUES (?, date('now','localtime'), ?, 1)
+            ON CONFLICT(user_id, usage_date, usage_type)
+            DO UPDATE SET count = count + 1
+        """, (user_id, usage_type))
+
+
+def usage_limit(uid, usage_type):
+    """يعيد الحد اليومي حسب النوع (روابط/بحث) وحالة VIP."""
+    u = get_user(uid)
+    is_vip = bool(u and u["is_vip"])
+    prefix = f"daily_{usage_type}_limit"
+    key = f"{prefix}_vip" if is_vip else f"{prefix}_free"
+    default = {"link": "5", "search": "5"}[usage_type]
+    return int(get_setting(key, default))
+
+
+def can_use(uid, usage_type):
+    """(ok, msg) — يفحص الحد اليومي للروابط أو البحث."""
+    limit = usage_limit(uid, usage_type)
+    used = usage_today(uid, usage_type)
+    if used >= limit:
+        label = "روابط" if usage_type == "link" else "بحث بالاسم"
+        return False, f"📊 وصلت للحد اليومي ({limit} {label}).\nارجع غداً أو ترقى إلى VIP 👑 لحد أعلى."
+    return True, ""
+
+
+def consume_usage(uid, usage_type):
+    """يستهلك وحدة من حد اليوم: يرجع (ok, msg) ويزيد العداد إن كان متاحاً."""
+    ok, msg = can_use(uid, usage_type)
+    if not ok:
+        return False, msg
+    increment_usage(uid, usage_type)
+    return True, ""
+
+
+# ---- تقييد السرعة (3 روابط/دقيقة أو تكرار نفس الرابط) ----
+def _normalize_url(url):
+    u = (url or "").strip().split("?")[0].split("#")[0].rstrip("/")
+    return u.lower()
+
+
+def set_rate_ban(user_id, seconds=1800):
+    until = __import__("time").time() + seconds
+    with cursor() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO rate_bans (user_id, until) VALUES (?,?)", (user_id, until)
+        )
+    return until
+
+
+def clear_rate_ban(user_id):
+    with cursor() as conn:
+        conn.execute("DELETE FROM rate_bans WHERE user_id=?", (user_id,))
+
+
+def get_rate_ban(user_id):
+    """يعيد (متبقي_ثواني) أو 0 إن لم يكن مقيّداً."""
+    with cursor() as conn:
+        row = conn.execute("SELECT until FROM rate_bans WHERE user_id=?", (user_id,)).fetchone()
+    if not row:
+        return 0
+    left = row["until"] - __import__("time").time()
+    if left <= 0:
+        clear_rate_ban(user_id)
+        return 0
+    return int(left)

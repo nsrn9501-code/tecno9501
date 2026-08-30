@@ -1,6 +1,7 @@
 """معالجة النصوص: روابط، بحث يوتيوب، أزرار النظام."""
 import asyncio
 import logging
+import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -9,7 +10,7 @@ from telegram.ext import ContextTypes
 from .. import db, downloader
 from ..config import OWNER_ID
 from ..jobs import schedule_download
-from ..state import _SEARCH_RESULTS, _USER_BUSY
+from ..state import _RATE_URLS, _SEARCH_RESULTS, _USER_BUSY
 from .system import (
     esc,
     fmt_duration,
@@ -25,6 +26,9 @@ from ..config import (
     POINTS_PER_AUDIO,
     POINTS_PER_REFERRAL,
     POINTS_PER_VIDEO,
+    RATE_BAN_SECONDS,
+    RATE_MAX_LINKS,
+    RATE_WINDOW_SECONDS,
     VIP_THRESHOLD,
 )
 
@@ -95,9 +99,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await join_prompt(context.bot, uid, chat_id)
         return
 
-    ok, msg = check_limits(uid)
-    if not ok:
-        await update.message.reply_text(msg)
+    # تقييد مؤقت 30 دقيقة لمن أرسل روابط كثيرة/مكررة
+    left = db.get_rate_ban(uid)
+    if left > 0:
+        mins = (left // 60) + 1
+        await update.message.reply_text(
+            f"⏸️ أنت مقيّد مؤقتاً بسبب إرسال روابط متكررة أو سريعة.\n"
+            f"🔇 التقييد سينتهي خلال <b>~{mins} دقيقة</b>.\n"
+            "💡 انتظر حتى تنتهي المدة ثم حاول مجدداً.",
+            parse_mode="HTML",
+        )
         return
 
     if _USER_BUSY.get(uid):
@@ -112,8 +123,48 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "أو اكتب إسم أغنية للبحث على يوتيوب."
             )
             return
+
+        # 1) حد الروابط اليومي (5)
+        ok, msg = db.consume_usage(uid, "link")
+        if not ok:
+            await update.message.reply_text(msg)
+            return
+
+        # 2) كشف الغش: 3 روابط خلال دقيقة أو إعادة نفس الرابط
+        now = time.time()
+        norm = db._normalize_url(text)
+        rec = _RATE_URLS.setdefault(uid, {"times": [], "recent_urls": {}})
+        rec["times"] = [t for t in rec["times"] if now - t <= RATE_WINDOW_SECONDS]
+        rec["times"].append(now)
+        prev_dup = rec["recent_urls"].get(norm)
+        rec["recent_urls"] = {u: t for u, t in rec["recent_urls"].items() if now - t <= RATE_WINDOW_SECONDS}
+        rec["recent_urls"][norm] = now
+        if prev_dup is not None:
+            db.set_rate_ban(uid, RATE_BAN_SECONDS)
+            await update.message.reply_text(
+                "⛔ <b>تم تقييدك مؤقتاً لمدة 30 دقيقة!</b>\n"
+                "🔄 أرسلت نفس الرابط أكثر من مرة، وهذا يُعتبر غشاً في النقاط.\n"
+                "🔇 انتظر انتهاء المدة ثم حاول مجدداً.",
+                parse_mode="HTML",
+            )
+            return
+        if len(rec["times"]) >= RATE_MAX_LINKS:
+            db.set_rate_ban(uid, RATE_BAN_SECONDS)
+            await update.message.reply_text(
+                "⛔ <b>تم تقييدك مؤقتاً لمدة 30 دقيقة!</b>\n"
+                "🚀 أرسلت أكثر من 3 روابط خلال دقيقة واحدة.\n"
+                "🔇 انتظر انتهاء المدة ثم حاول مجدداً.",
+                parse_mode="HTML",
+            )
+            return
+
         await start_download(update, context, text, platform, "video")
     else:
+        # حد البحث اليومي (5) — يُستهلك عند إجراء البحث نفسه
+        ok, msg = db.consume_usage(uid, "search")
+        if not ok:
+            await update.message.reply_text(msg)
+            return
         await do_search(update, context, text)
 
 

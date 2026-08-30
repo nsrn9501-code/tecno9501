@@ -13,3 +13,7 @@ def init_queue():
     global _job_queue, _job_seq
     _job_queue = asyncio.PriorityQueue()
     _job_seq = 0
+
+
+# تتبّع إرسال الروابط للتقييد: user_id -> {"times": [unix...], "recent_urls": {normalized_url: unix}}
+_RATE_URLS = {}

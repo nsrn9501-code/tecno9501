@@ -78,10 +78,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         _SEARCH_RESULTS.pop(uid, None)
 
-        ok, msg = check_limits(uid)
-        if not ok:
-            await context.bot.send_message(chat_id, msg)
-            return
         if _USER_BUSY.get(uid):
             await context.bot.send_message(chat_id, "⏳ عندك طلب قيد التنفيذ، إنتظر رجاءً…")
             return
