@@ -3,11 +3,12 @@ import asyncio
 import logging
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from .. import db, downloader
+from ..facts import next_fact
 from ..config import OWNER_ID
 from ..jobs import schedule_download
 from ..state import _RATE_URLS, _SEARCH_RESULTS, _USER_BUSY
@@ -71,6 +72,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if text in ("💬 كروب المناقشة", "كروب المناقشة", "كروب", "💬"):
         await _discussion_group(update, context)
+        return
+    if text in ("💡 معلومتي", "معلومتي", "💡"):
+        await _my_fact(update, context)
+        return
+    if text in ("🙈 إخفاء الأزرار", "إخفاء الأزرار", "🙈"):
+        await _hide_keyboard(update, context)
         return
     if text in ("👑 المالك", "👑 لوحة المالك"):
         if uid == OWNER_ID:
@@ -227,6 +234,39 @@ async def _discussion_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💬 لم يتم تعيين كروب مناقشة بعد، حاول لاحقاً.",
             reply_markup=main_keyboard(uid),
         )
+
+
+async def _my_fact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """زر معلومتي: يعرض للمستخدم اختيار نوع المعلومة القادمة."""
+    uid = update.effective_user.id
+    cur = db.get_fact_category(uid)
+    kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🕌 دينية", callback_data="factcat:religious"),
+                InlineKeyboardButton("🌍 عامة", callback_data="factcat:general"),
+            ],
+            [InlineKeyboardButton("✨ متنوعة (تناوب)", callback_data="factcat:both")],
+        ]
+    )
+    labels = {"religious": "دينية 🕌", "general": "عامة 🌍", "both": "متنوعة ✨"}
+    await update.message.reply_text(
+        "💡 <b>المعلومات بعد كل تحميل</b>\n\n"
+        "بعد كل فيديو أو أغنية تنزّلها سأرسل لك معلومة قصيرة.\n"
+        "اختر نوع المعلومات الذي يعجبك 👇\n\n"
+        f"الحالي: <b>{labels.get(cur, 'متنوعة ✨')}</b>",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+
+
+async def _hide_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """زر إخفاء الأزرار: يخفي لوحة المفاتيح النظامية لإفساح مجال الشاشة."""
+    await update.message.reply_text(
+        "🙈 تم إخفاء الأزرار.\n\n"
+        "للإظهار مجدداً اكتب /start أو أرسل أي شيء.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 async def do_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):

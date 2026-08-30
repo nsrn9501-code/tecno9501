@@ -9,6 +9,7 @@ from . import db
 from .config import POINTS_PER_AUDIO, POINTS_PER_VIDEO, VIP_THRESHOLD
 from .downloader import (DownloadError, cleanup, download_audio, download_video,
                           ensure_telegram_compatible, probe_media)
+from .facts import next_fact
 from .handlers.system import esc
 from . import state
 from .state import _USER_BUSY
@@ -80,19 +81,25 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             size = os.path.getsize(path)
             try:
                 if kind == "video":
-                    # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4)؛ إن فشل التحويل
-                    # لا نرسل الملف الأصلي التالف بل نبلغ المستخدم.
+                    # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4 / H.264)؛
+                    # لا نرسل أبداً ملفاً بترميز آخر (VP9/AV1) لأنه يطلب مشغلاً خارجياً.
                     try:
                         converted = await asyncio.to_thread(ensure_telegram_compatible, path)
-                        test_note = "🧪 اختبار: النسخة المعبأة (remux H.264/AAC) — هل تشتغل عندك؟"
                     except DownloadError as conv_exc:
                         logger.warning("تحويل الفيديو فشل: %s", conv_exc)
                         raise conv_exc
                     if converted != path:
-                        logger.info("✅ تحويل الفيديو إلى صيغة H.264 التي يدعمها تيليجرام: %s", converted)
+                        logger.info("✅ تحويل الفيديو إلى صيغة MP4/H.264 يدعمها تيليجرام: %s", converted)
+                        try:
+                            os.remove(path)
+                        except OSError:
+                            pass
                         path = converted
-                    caption = f"{caption}\n{test_note}"
                     probe = await asyncio.to_thread(probe_media, path)
+                    if not probe or probe.get("vcodec") != "h264":
+                        raise DownloadError(
+                            "❌ الفيديو وصل بترميز لا يدعمه تيليجرام وفشل تحويله. جرّب رابطاً آخر."
+                        )
                     kwargs = {"supports_streaming": True, "parse_mode": "HTML"}
                     if probe:
                         kwargs.update(
@@ -126,10 +133,12 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     "✅ أولوية أعلى في التحميل",
                     parse_mode="HTML",
                 )
+            fact_label, fact_text = next_fact(uid)
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_id,
-                text=f"✅ تم!\n⭐ +{points} نقطة (نقاطك: {now.get('points', 0)})",
+                text=f"✅ تم!\n⭐ +{points} نقطة (نقاطك: {now.get('points', 0)})\n\n"
+                     f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}",
                 parse_mode="HTML",
             )
         except asyncio.TimeoutError:

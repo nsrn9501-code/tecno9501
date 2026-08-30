@@ -1,7 +1,7 @@
 """/start — ترحيب، إنشاء المستخدم، إشعار دخول للمالك، روابط الدعوة والهدية."""
 import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
@@ -72,6 +72,26 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
+
+    if is_new:
+        # أول دخول: يسأل المستخدم عن نوع المعلومات التي يريدها بعد كل تحميل
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🕌 معلومات دينية", callback_data="factcat:religious"),
+                    InlineKeyboardButton("🌍 معلومات عامة", callback_data="factcat:general"),
+                ],
+                [InlineKeyboardButton("✨ متنوعة (الأثنين معاً)", callback_data="factcat:both")],
+            ]
+        )
+        await update.message.reply_text(
+            "👋 أهلاً صديقي!🖤\n\n"
+            "أنا بوت تحميل الوسائط 📥\n"
+            "وسأرسل لك معلومة مفيدة بعد كل تحميل 💡\n\n"
+            "اختر نوع المعلومات الذي يعجبك 👇",
+            reply_markup=kb,
+        )
+        return
 
     await update.message.reply_text(
         home_text(u),

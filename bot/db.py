@@ -121,6 +121,7 @@ def init_db():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_vip', '15')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_free', '5')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_vip', '15')")
+        _user_prefs_table()
 
 
 # ---- users ----
@@ -415,3 +416,72 @@ def get_rate_ban(user_id):
         clear_rate_ban(user_id)
         return 0
     return int(left)
+
+
+# ---- تفضيلات المستخدمين (نوع المعلومة التي يريدها بعد كل تحميل) ----
+def _user_prefs_table():
+    with cursor() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_prefs (
+                user_id INTEGER PRIMARY KEY,
+                fact_category TEXT DEFAULT 'both',
+                welcomed INTEGER DEFAULT 0
+            )
+        ''')
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
+        if "welcomed" not in cols:
+            conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
+
+
+def init_db_prefs():
+    """ينشئ جدول تفضيلات المستخدمين (يُستدعى ضمن init_db)."""
+    _user_prefs_table()
+
+
+def set_fact_category(user_id, category):
+    _user_prefs_table()
+    with cursor() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_prefs (user_id, fact_category) VALUES (?,?)",
+            (user_id, category),
+        )
+
+
+def get_fact_welcomed(user_id):
+    _user_prefs_table()
+    with cursor() as conn:
+        row = conn.execute(
+            "SELECT welcomed FROM user_prefs WHERE user_id=?", (user_id,)
+        ).fetchone()
+    return bool(row and row["welcomed"])
+
+
+def mark_fact_welcomed(user_id):
+    _user_prefs_table()
+    with cursor() as conn:
+        conn.execute("UPDATE user_prefs SET welcomed=1 WHERE user_id=?", (user_id,))
+
+
+def get_fact_category(user_id):
+    _user_prefs_table()
+    with cursor() as conn:
+        row = conn.execute(
+            "SELECT fact_category FROM user_prefs WHERE user_id=?", (user_id,)
+        ).fetchone()
+    return row["fact_category"] if row else "both"
+
+
+# ---- فهرس تقدم المعلومات (لمنع التكرار) ----
+def get_fact_offset(user_id, category):
+    with cursor() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key=?", (f"fact_offset_{category}_{user_id}",)
+        ).fetchone()
+    try:
+        return int(row["value"]) if row and row["value"] else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_fact_offset(user_id, category, idx):
+    set_setting(f"fact_offset_{category}_{user_id}", str(idx))

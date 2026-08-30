@@ -28,7 +28,8 @@ def main_keyboard(user_id):
         [KeyboardButton("📥 تحميل/بحث"), KeyboardButton("👤 حسابي")],
         [KeyboardButton("🎁 مكافأة يومية"), KeyboardButton("🔗 رابط الدعوة")],
         [KeyboardButton("⭐ نظام الـ VIP"), KeyboardButton("💬 كروب المناقشة")],
-        [KeyboardButton("ℹ️ المساعدة"), KeyboardButton("👑 المالك")],
+        [KeyboardButton("💡 معلومتي"), KeyboardButton("ℹ️ المساعدة")],
+        [KeyboardButton("👑 المالك"), KeyboardButton("🙈 إخفاء الأزرار")],
     ]
     return ReplyKeyboardMarkup(
         rows, resize_keyboard=True, is_persistent=True, input_field_placeholder="أرسل رابطاً أو إسم أغنية…"

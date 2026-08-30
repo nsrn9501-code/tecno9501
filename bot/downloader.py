@@ -405,11 +405,13 @@ def probe_media(path):
     except (TypeError, ValueError):
         duration = 0
     width = height = 0
+    vcodec = None
     for st in info.get("streams", []):
         if st.get("codec_type") == "video":
             width = st.get("width") or 0
             height = st.get("height") or 0
+            vcodec = st.get("codec_name")
             break
     if not width or not height or duration <= 0:
         return None
-    return {"duration": int(duration), "width": int(width), "height": int(height)}
+    return {"duration": int(duration), "width": int(width), "height": int(height), "vcodec": vcodec}

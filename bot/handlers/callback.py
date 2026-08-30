@@ -31,6 +31,28 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await owner_cb(q, context, data[4:], uid, chat_id)
         return
 
+    if data.startswith("factcat:"):
+        cat = data.split(":", 1)[1]
+        if cat in ("religious", "general", "both"):
+            db.set_fact_category(uid, cat)
+        labels = {"religious": "دينية 🕌", "general": "عامة 🌍", "both": "متنوعة ✨"}
+        await q.edit_message_text(
+            f"💡 تم حفظ اختيارك: <b>{labels.get(cat, 'متنوعة ✨')}</b>\n"
+            "ستصلك معلومة جديدة بعد كل تحميل إن شاء الله 🎁",
+            parse_mode="HTML",
+        )
+        if not db.get_fact_welcomed(uid):
+            db.mark_fact_welcomed(uid)
+            u = db.get_user(uid) or {}
+            from .system import home_text, main_keyboard
+            await context.bot.send_message(
+                chat_id,
+                home_text(u),
+                parse_mode="HTML",
+                reply_markup=main_keyboard(uid),
+            )
+        return
+
     if data == "verify:sub":
         status = await sub_status(context.bot, uid)
         if status == "ok":
