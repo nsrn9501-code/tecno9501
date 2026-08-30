@@ -18,6 +18,7 @@ from .system import (
     get_owner_state,
     looks_like_url,
     main_keyboard,
+    back_only_keyboard,
     owner_card,
     send_stats_reply,
     vip_bar,
@@ -259,7 +260,7 @@ async def _vip_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👑 الحالة: {vip_txt}"
     )
     await update.message.reply_text(
-        txt, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(uid)
+        txt, parse_mode=ParseMode.HTML, reply_markup=back_only_keyboard()
     )
 
 
@@ -274,12 +275,12 @@ async def _discussion_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "انضم إلينا وتواصل مع الأعضاء والإدارة 👇\n"
             f"{link}",
             parse_mode=ParseMode.HTML,
-            reply_markup=main_keyboard(uid),
+            reply_markup=back_only_keyboard(),
         )
     else:
         await update.message.reply_text(
             "💬 لم يتم تعيين كروب مناقشة بعد، حاول لاحقاً.",
-            reply_markup=main_keyboard(uid),
+            reply_markup=back_only_keyboard(),
         )
 
 

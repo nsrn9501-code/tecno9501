@@ -44,12 +44,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not db.get_fact_welcomed(uid):
             db.mark_fact_welcomed(uid)
             u = db.get_user(uid) or {}
-            from .system import home_text, main_keyboard
+            from .system import home_text, back_only_keyboard
             await context.bot.send_message(
                 chat_id,
                 home_text(u),
                 parse_mode="HTML",
-                reply_markup=main_keyboard(uid),
+                reply_markup=back_only_keyboard(),
             )
         return
 
