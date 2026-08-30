@@ -1,6 +1,9 @@
 import os
 import time
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 import shutil
 import subprocess
 
@@ -380,7 +383,30 @@ def ensure_telegram_compatible(path):
         if os.path.exists(out):
             os.remove(out)
 
-    # 2) إعادة ترميز كاملة: تحويل أي كوديك (VP9/AV1…) إلى H.264 + AAC-LC + yuv420p + faststart
+    # 2) المسار السريع: نسخ الفيديو H.264 كما هو + إعادة ترميز الصوت إلى AAC-LC فقط
+    #    (انستغرام غالباً H.264 + HE-AAC — هذا يحلّها بثوانٍ بدل دقيقة).
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", path,
+             "-c:v", "copy",
+             "-c:a", "aac", "-profile:a", "aac_low",
+             "-b:a", "128k", "-ar", "44100", "-ac", "2",
+             "-movflags", "+faststart", "-f", "mp4", out],
+            capture_output=True, text=True, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        r = None
+    if r is not None and r.returncode == 0 and os.path.exists(out):
+        info = _ffprobe_info(out)
+        if info and _video_is_ready(info):
+            size = os.path.getsize(out)
+            if size <= _safe_limit_mb():
+                logger.info("المسار السريع: نسخ الفيديو + AAC-LC → %s", out)
+                return out
+        if os.path.exists(out):
+            os.remove(out)
+
+    # 3) إعادة ترميز كاملة: تحويل أي كوديك (VP9/AV1…) إلى H.264 + AAC-LC + yuv420p + faststart
     r = _ffmpeg_transcode(path, out)
     conv_ok = r is not None and r.returncode == 0 and os.path.exists(out)
     final_info = _ffprobe_info(out) if conv_ok else None
@@ -395,7 +421,7 @@ def ensure_telegram_compatible(path):
         if os.path.exists(out):
             os.remove(out)
 
-    # 3) مسار الضغط: دقة ≤720p وbitrate أقصى متحكم به ليبقى الحجم تحت 48MB
+    # 4) مسار الضغط: دقة ≤720p وbitrate أقصى متحكم به ليبقى الحجم تحت 48MB
     #    نستخرج مدة الفيديو لنحسب bitrate آمناً.
     info = _ffprobe_info(path)
     duration = 0
