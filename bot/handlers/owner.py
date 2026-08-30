@@ -294,15 +294,13 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif action == "grant_vip":
         set_owner_state(uid, "grant_vip")
         await q.message.reply_text(
-            "⭐ أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لترقيته إلى VIP.
-"
+            "⭐ أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لترقيته إلى VIP.\n"
             "لإلغاء: /cancel"
         )
     elif action == "revoke_vip":
         set_owner_state(uid, "revoke_vip")
         await q.message.reply_text(
-            "🚫 أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لإلغاء الـ VIP.
-"
+            "🚫 أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لإلغاء الـ VIP.\n"
             "لإلغاء: /cancel"
         )
     elif action == "gift":
@@ -356,16 +354,19 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 return
             db.set_vip(target_id, 1)
             await update.message.reply_text(
-                f"⭐ تم ترقية <code>{target_id}</code> إلى VIP 👑
-"
+                f"⭐ تم ترقية <code>{target_id}</code> إلى VIP 👑\n"
                 f"📛 {esc(u.get('first_name') or 'مستخدم')} (@{esc(u.get('username') or '-')})",
                 parse_mode="HTML"
             )
             try:
-                await context.bot.send_message(target_id, "🎉 مبروك! تم ترقيتك إلى عضو <b>VIP</b> 👑
-✅ استخدام البوت بدون اشتراك إجباري
-✅ جودة 1080p
-✅ حدود أعلى", parse_mode="HTML")
+                await context.bot.send_message(
+                    target_id,
+                    "🎉 مبروك! تم ترقيتك إلى عضو <b>VIP</b> 👑\n"
+                    "✅ استخدام البوت بدون اشتراك إجباري\n"
+                    "✅ جودة 1080p\n"
+                    "✅ حدود أعلى",
+                    parse_mode="HTML"
+                )
             except Exception:
                 pass
         else:
@@ -374,8 +375,7 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 return
             db.set_vip(target_id, 0)
             await update.message.reply_text(
-                f"🚫 تم إلغاء VIP من <code>{target_id}</code>
-"
+                f"🚫 تم إلغاء VIP من <code>{target_id}</code>\n"
                 f"📛 {esc(u.get('first_name') or 'مستخدم')} (@{esc(u.get('username') or '-')})",
                 parse_mode="HTML"
             )
