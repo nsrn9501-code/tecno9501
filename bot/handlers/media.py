@@ -3,7 +3,7 @@ import asyncio
 import logging
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
@@ -294,19 +294,6 @@ async def _my_fact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"الحالي: <b>{labels.get(cur, 'متنوعة ✨')}</b>",
         parse_mode="HTML",
         reply_markup=kb,
-    )
-
-
-async def _hide_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """زر إخفاء الأزرار: يخفي الأزرار ويترك زر رجوع واحد."""
-    from telegram import ReplyKeyboardMarkup, KeyboardButton
-    await update.message.reply_text(
-        "🙈 تم إخفاء الأزرار.\n\n"
-        "للعودة للقائمة اضغط زر «🏠 رجوع» بالأسفل.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("🏠 رجوع")]],
-            resize_keyboard=True, is_persistent=True,
-        ),
     )
 
 
