@@ -22,10 +22,13 @@ def fmt_duration(sec):
     return f"{m}:{s:02d}"
 
 
+from telegram import ReplyKeyboardRemove
+
+
 def _hide_all():
-    """لا نتلاعب بالكيبورد في الردود — الأزرار تبقى ظاهرة حتى يخفيها
-    المستخدم بزر الرجوع من الموبايل (سلوك تيليجرام الطبيعي)."""
-    return None
+    """اخفاء الأزرار تلقائياً بعد كل رد (مثل بوتات أخرى) —
+    ترجعها فقط عبر /start. ·"""
+    return ReplyKeyboardRemove()
 
 
 def main_keyboard(user_id):
