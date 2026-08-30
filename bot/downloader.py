@@ -99,10 +99,15 @@ def download_video(url, max_height=1080):
         raise DownloadError("الرابط غير مدعوم.")
     outtmpl = os.path.join(DOWNLOAD_DIR, f"video_{os.getpid()}_%(id)s.%(ext)s")
     opts = _base_opts(platform, outtmpl)
-    fmt = f"bestvideo[ext=mp4][height<=?{max_height}]+bestaudio[ext=m4a]/bestvideo[height<=?{max_height}]+bestaudio/best[ext=mp4]/best"
+    # نفضّل فيديو H.264 (avc1) لأنه يدعمه تيليجرام مباشرة، وإلا نأخذ أفضل فيديو
+    # متاح (قد يكون VP9) ثم نحوله. أبداً لا ننزل إلى ملف صوتي فقط في كفيديو.
+    fmt = (f"bestvideo[height<=?{max_height}][vcodec~='^(avc1|h264)']+bestaudio/"
+           f"bestvideo[height<=?{max_height}]+bestaudio/"
+           f"bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
     opts.update({
         "format": fmt,
         "merge_output_format": "mp4",
+        "format_sort": ["res", "vcodec:h264", "ext:mp4:m4a"],
     })
     try:
         return _run(platform, url, opts, "video")
