@@ -9,3 +9,6 @@ bot/cookies/*.txt
 nohup.out
 bot.log
 bot.pid
+project_backup.zip
+watchdog.log
+watchdog.out
