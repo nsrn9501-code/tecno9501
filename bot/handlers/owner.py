@@ -564,9 +564,15 @@ async def owner_cb(q, context, action, uid, chat_id):
 
 
 async def _shutdown(app):
+    """يوقف البوت فعلياً بقتل العملية الحالية (الزر لا يعلق)."""
     await asyncio.sleep(0.5)
     try:
         await app.stop_running()
+    except Exception:
+        pass
+    try:
+        import os, signal
+        os.kill(os.getpid(), signal.SIGTERM)
     except Exception:
         pass
 
