@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from .. import db
 from ..config import OWNER_ID
 from ..jobs import schedule_download
-from ..state import _OWNER_STATE, _SEARCH_RESULTS, _USER_BUSY
+from ..state import _OWNER_STATE, _PENDING_LINKS, _SEARCH_RESULTS, _USER_BUSY
 from .owner import owner_cb
 from .subscription import check_limits, sub_status
 from .system import esc
@@ -61,6 +61,36 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await q.answer("❌ لست مشتركاً بعد!", show_alert=True)
+        return
+
+    if data.startswith("qual:"):
+        # جودة مختارة — نبدأ التحميل بالجودة المختارة
+        if uid in _PENDING_LINKS:
+            link = _PENDING_LINKS.pop(uid)
+            height_str = data.split(":", 1)[1]
+            if height_str == "auto":
+                kind_sel = "video"
+                label = "تلقائي ⚡"
+                max_h = None
+            elif height_str == "0":
+                kind_sel = "audio"
+                label = "صوت MP3 🎵"
+                max_h = None
+            else:
+                kind_sel = "video"
+                max_h = int(height_str)
+                label = f"{max_h}p"
+            await q.edit_message_text(
+                f"⏳ جاري التحميل ({label})…", parse_mode=ParseMode.HTML
+            )
+            from ..jobs import schedule_download
+            await schedule_download(
+                bot=context.bot, chat_id=chat_id, uid=uid, url=link["url"],
+                platform=link["platform"], kind=kind_sel,
+                status_id=q.message.message_id, max_height=max_h,
+            )
+        else:
+            await q.edit_message_text("⏰ انتهت صلاحية الاختيار، أعد إرسال الرابط.")
         return
 
     if data.startswith("pick:"):

@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 from . import db, downloader, state
-from .config import BOT_TOKEN
+from .config import BOT_TOKEN, OWNER_ID
 from .handlers import callback
 from .handlers.help import cmd_daily, cmd_help, cmd_referral
 from .handlers.media import handle_text
@@ -39,6 +39,19 @@ async def post_init(app: Application):
     downloader.cleanup_old_files(24)
 
 
+
+async def _handle_owner_all(update, context):
+    """يلقط جميع رسائل المالك (نص + فيديو + معاد توجيهها + أي نوع)
+    ويرسلها لـ handle_owner_input إذا كان المالك في حالة انتظار."""
+    uid = (update.effective_user or {}).id if update.effective_user else None
+    if uid != OWNER_ID:
+        return
+    from .handlers.system import get_owner_state
+    if get_owner_state(uid):
+        from .handlers.owner import handle_owner_input
+        await handle_owner_input(update, context)
+
+
 def build_app():
     state.init_queue()
     defaults = Defaults(parse_mode=ParseMode.HTML)
@@ -51,6 +64,11 @@ def build_app():
         .build()
     )
 
+    # Holder for owner forwarded messages (catch ALL message types)
+    app.add_handler(MessageHandler(
+        filters.ALL & ~filters.COMMAND & filters.User(user_id=OWNER_ID),
+        _handle_owner_all,
+    ), group=-1)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("daily", cmd_daily))

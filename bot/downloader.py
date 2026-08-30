@@ -503,3 +503,47 @@ def probe_media(path):
         "duration": int(duration), "width": int(width), "height": int(height),
         "vcodec": vcodec, "acodec": acodec, "acodec_profile": acodec_profile,
     }
+
+
+def fetch_qualities(url):
+    """تجلب الصيغ المتاحة للرابط وتعيد قائمة [{height, label, ext}] مرتبة صعوداً."""
+    platform = detect_platform(url)
+    if not platform:
+        return []
+    opts = _base_opts(platform, "%(title)s.%(ext)s")
+    opts["skip_download"] = True
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        return []
+    formats = info.get("formats") or []
+    heights = set()
+    for f in formats:
+        h = f.get("height")
+        vcodec = f.get("vcodec", "none")
+        if h and vcodec != "none" and h > 0:
+            heights.add(int(h))
+    ordered = sorted(heights)
+    qualities = []
+    seen_labels = set()
+    for h in ordered:
+        if h <= 240:
+            label = "240p 📉"
+        elif h <= 360:
+            label = "360p 📺"
+        elif h <= 480:
+            label = "480p 🎬"
+        elif h <= 720:
+            label = "720p HD ✨"
+        elif h <= 1080:
+            label = "1080p HD 🎉"
+        else:
+            label = f"{h}p 🌟"
+        key = str(h)
+        if key not in seen_labels:
+            qualities.append({"height": h, "label": label})
+            seen_labels.add(key)
+    # add MP3 audio option
+    qualities.append({"height": 0, "label": "🎵 صوت MP3"})
+    return qualities

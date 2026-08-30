@@ -17,3 +17,6 @@ def init_queue():
 
 # تتبّع إرسال الروابط للتقييد: user_id -> {"times": [unix...], "recent_urls": {normalized_url: unix}}
 _RATE_URLS = {}
+
+# روابط بانتظار اختيار الجودة: user_id -> {"url", "platform", "kind"}
+_PENDING_LINKS = {}

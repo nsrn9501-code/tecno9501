@@ -179,10 +179,11 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode=ParseMode.HTML,
         )
     elif action == "set_upload_channel":
-        if update.message.forward_from_chat:
-            fwd = update.message.forward_from_chat
-            cid = str(fwd.id)
-            cname = fwd.title or getattr(fwd, "username", "") or cid
+        # PTB 22.+ استبدل forward_from_chat بـ forward_origin.
+        # نقرأ القناة من الرسالة المعاد توجيهها (Channel أو Chat) مهما كان النوع.
+        parsed = _parse_forward_origin(update)
+        if parsed:
+            cid, cname = parsed
             db.set_setting("upload_channel_id", cid)
             db.set_setting("upload_channel_name", cname)
             clear_owner_state(uid)
@@ -514,3 +515,27 @@ async def _restart(app):
         await app.stop_running()
     except Exception:
         pass
+
+
+def _parse_forward_origin(update):
+    """يستخرج (chat_id_str, chat_name) من رسالة مُعاد توجيهها،
+    متوافق مع forward_origin الجديد في PTB 22.+."""
+    msg = update.message
+    if not msg:
+        return None
+    origin = getattr(msg, "forward_origin", None)
+    if origin is not None:
+        ch = None
+        # MessageOriginChannel → chat / MessageOriginChat → sender_chat
+        ch = getattr(origin, "chat", None) or getattr(origin, "sender_chat", None)
+        if ch is not None:
+            cid = str(getattr(ch, "id", "") or "")
+            title = getattr(ch, "title", None) or getattr(ch, "username", None) or cid
+            return (cid, title or cid)
+    # fallback قديم للتوافق
+    fwd = getattr(msg, "forward_from_chat", None)
+    if fwd is not None:
+        cid = str(getattr(fwd, "id", "") or "")
+        title = getattr(fwd, "title", None) or getattr(fwd, "username", None) or cid
+        return (cid, title or cid)
+    return None

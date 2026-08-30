@@ -11,7 +11,7 @@ from .. import db, downloader
 from ..facts import next_fact
 from ..config import OWNER_ID
 from ..jobs import schedule_download
-from ..state import _RATE_URLS, _SEARCH_RESULTS, _USER_BUSY
+from ..state import _PENDING_LINKS, _RATE_URLS, _SEARCH_RESULTS, _USER_BUSY
 from .system import (
     esc,
     fmt_duration,
@@ -166,7 +166,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        await start_download(update, context, text, platform, "video")
+        # نقترح الجودة المتاحة قبل بدء التحميل (Quality Selector)
+        await _ask_quality(update, context, text, platform)
     else:
         # حد البحث اليومي (5) — يُستهلك عند إجراء البحث نفسه
         ok, msg = db.consume_usage(uid, "search")
@@ -176,7 +177,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await do_search(update, context, text)
 
 
-async def start_download(update, context, url, platform, kind):
+async def start_download(update, context, url, platform, kind, max_height=None):
     uid = update.effective_user.id
     chat_id = update.effective_chat.id
     status_msg = await update.message.reply_text(
@@ -185,6 +186,44 @@ async def start_download(update, context, url, platform, kind):
     await schedule_download(
         bot=context.bot, chat_id=chat_id, uid=uid, url=url,
         platform=platform, kind=kind, status_id=status_msg.message_id,
+        max_height=max_height,
+    )
+
+
+async def _ask_quality(update, context, url, platform):
+    """يعرض أزرار الجودة المتاحة قبل التحميل (360p/720p/1080p/MP3)."""
+    uid = update.effective_user.id
+    chat_id = update.effective_chat.id
+    status_msg = await update.message.reply_text(
+        f"✅ تم التعرف على الرابط ({platform}).\n⏳ جاري فحص الجودات المتاحة…",
+    )
+    try:
+        qualities = await asyncio.to_thread(downloader.fetch_qualities, url)
+    except Exception:
+        qualities = []
+    if not qualities:
+        # ما في جودات معروفة — أرسل مباشرة كفيديو
+        await start_download(update, context, url, platform, "video")
+        return
+    _PENDING_LINKS[uid] = {"url": url, "platform": platform, "kind": "video"}
+    rows = []
+    for i in range(0, len(qualities), 2):
+        row = []
+        for q in qualities[i:i+2]:
+            row.append(InlineKeyboardButton(
+                q["label"], callback_data=f"qual:{q['height']}")
+            )
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton("⚡ تلقائي", callback_data="qual:auto"),
+        InlineKeyboardButton("❌ إلغاء", callback_data="cancel"),
+    ])
+    lines = "\n".join(f"• {q['label']}" for q in qualities)
+    await status_msg.edit_text(
+        f"📥 <b>اختر الجودة:</b>\n{lines}\n\n"
+        "⚡ <b>تلقائي</b> = أفضل جودة حسب رتبتك (VIP: 1080p / عادي: 720p)",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(rows),
     )
 
 

@@ -131,3 +131,27 @@ def edit_message_text(chat_id, message_id, text):
         data={"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML"},
         timeout=60,
     )
+
+
+def edit_message_caption(chat_id, message_id, caption):
+    """يعدّل نص/كابشن رسالة (مثلاً فيديو في قناة) — parse_mode HTML."""
+    return requests.post(
+        f"{API}/editMessageCaption",
+        data={"chat_id": chat_id, "message_id": message_id, "caption": caption, "parse_mode": "HTML"},
+        timeout=60,
+    )
+
+
+def get_message_id_from_send(resp):
+    """يستخرج message_id من رد sendVideo (requests.Response)."""
+    try:
+        return resp.json()["result"]["message_id"]
+    except Exception:
+        return None
+
+
+def upload_video_to_channel(channel_id, path, caption, duration=0, width=0, height=0):
+    """يرفع الفيديو إلى قناة الرفع ويعيد (message_id, response) أو (None, resp)."""
+    sent = send_video(channel_id, path, caption, duration, width, height)
+    mid = get_message_id_from_send(sent)
+    return (mid, sent)
