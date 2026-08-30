@@ -17,13 +17,11 @@ from .state import _USER_BUSY
 
 logger = logging.getLogger(__name__)
 
-
 def enqueue(user_id, coro):
     state._job_seq += 1
     priority = 0 if db.is_vip(user_id) else 1
     state._job_queue.put_nowait((priority, state._job_seq, coro))
     logger.info("🎯 أُضيفت مهمة إلى الطابور: user=%s seq=%s", user_id, state._job_seq)
-
 
 async def queue_worker(app):
     """Processes download jobs; exits when the application stops."""
@@ -48,7 +46,6 @@ async def queue_worker(app):
             logger.error("Queue error:\n%s", traceback.format_exc())
             await asyncio.sleep(0.5)
 
-
 async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id):
     """جدولة تحميل + رفع للتيليغرام. kind = 'audio' | 'video'."""
     _USER_BUSY[uid] = True
@@ -69,8 +66,6 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                 path, title = await asyncio.wait_for(
                     asyncio.to_thread(download_video, url, max_h), timeout=timeout
                 )
-
-            tool_placeholder_edit1
 
             icon = "🎵" if kind == "audio" else "🎬"
             caption = f"{icon} <b>{esc(title or 'وسائط')}</b>\n<i>via {platform}</i>"
