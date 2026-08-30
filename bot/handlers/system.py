@@ -26,7 +26,7 @@ from telegram import ReplyKeyboardRemove
 
 
 def _hide_all():
-    """إخفاء الأزرار بالكامل — يظهر بعد كل رد."""
+    """إخفاء الأزرار بالكامل بعد كل رد — الرجوع من الموبايل يختفيها طبيعياً."""
     return ReplyKeyboardRemove()
 
 

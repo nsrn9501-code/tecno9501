@@ -76,10 +76,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in ("💡 معلومتي", "معلومتي", "💡"):
         await _my_fact(update, context)
         return
-    if text in ("🙈 إخفاء الأزرار", "إخفاء الأزرار", "🙈"):
-        return  # تم إلغاء الزر
-    if text == "🏠 رجوع":
-        return  # تم إلغاء الزر
+
     if text in ("👑 المطور", "👑 لوحة المطور"):
         if uid == OWNER_ID:
             from .owner import cmd_owner
