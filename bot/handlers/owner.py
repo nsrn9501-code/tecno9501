@@ -38,6 +38,7 @@ def owner_keyboard():
             ],
             [
                 InlineKeyboardButton("💬 كروب المناقشة", callback_data="own:group"),
+                InlineKeyboardButton("🎬 قناة الرفع", callback_data="own:upload_channel"),
             ],
             [
                 InlineKeyboardButton("👑 منح نقاط", callback_data="own:points"),
@@ -177,6 +178,30 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "أو <code>remove</code> لإعادة الافتراضي.",
             parse_mode=ParseMode.HTML,
         )
+    elif action == "set_upload_channel":
+        if update.message.forward_from_chat:
+            fwd = update.message.forward_from_chat
+            cid = str(fwd.id)
+            cname = fwd.title or getattr(fwd, "username", "") or cid
+            db.set_setting("upload_channel_id", cid)
+            db.set_setting("upload_channel_name", cname)
+            clear_owner_state(uid)
+            await update.message.reply_text(
+                f"✅ تم تعيين قناة الرفع!\n📺 {esc(cname)} (<code>{cid}</code>)\n\n"
+                "🎬 الآن الفيديوهات سترفع للقناة أولاً ثم تُرسل للمستخدم.",
+                parse_mode="HTML",
+            )
+            return
+        if text.strip().lower() == "remove":
+            db.set_setting("upload_channel_id", "")
+            db.set_setting("upload_channel_name", "")
+            clear_owner_state(uid)
+            await update.message.reply_text("✅ تم إزالة قناة الرفع.")
+            return
+        await update.message.reply_text(
+            "❌ أعد توجيه أي رسالة من القناة هنا،\nأو أرسل remove لإزالتها.",
+        )
+
     elif action == "channel":
         clear_owner_state(uid)
         if text.strip().lower() == "remove":
@@ -355,6 +380,21 @@ async def owner_cb(q, context, action, uid, chat_id):
             "لإلغاء: /cancel",
             parse_mode=ParseMode.HTML,
         )
+    elif action == "upload_channel":
+        cur = db.get_setting("upload_channel_name") or "غير مفعلة"
+        await q.message.reply_text(
+            f"🎬 <b>قناة رفع الفيديوهات</b>\n\n"
+            f"الحالية: <code>{esc(cur)}</code>\n\n"
+            "<b>كيف تعمل؟</b>\n"
+            "1) البوت يرفع الفيديو إلى القناة أولاً\n"
+            "2) سيرفر تيليجرام يعالجه ويصبح فيديو رسمي قابلاً للبث\n"
+            "3) يرسله للمستخدم → يعمل المشغل الداخلي دائماً\n\n"
+            "📥 اضغط الزر ثم أعد توجيه أي رسالة من القناة هنا\n"
+            "(أو أرسل <code>remove</code> لإزالتها)",
+            parse_mode="HTML",
+        )
+        set_owner_state(uid, "set_upload_channel")
+
     elif action == "settings":
         ch = db.get_setting("channel_id") or "غير مفعلة"
         txt = (

@@ -98,16 +98,41 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                         raise DownloadError(
                             "❌ الفيديو وصل بترميز لا يدعمه تيليجرام وفشل تحويله. جرّب رابطاً آخر."
                         )
-                    up_kwargs = {}
-                    if probe:
-                        up_kwargs = {
-                            "duration": probe["duration"],
-                            "width": probe["width"],
-                            "height": probe["height"],
-                        }
-                    r = uploader.send_video(chat_id, path, caption, **up_kwargs)
-                    if r.status_code != 200:
-                        logger.error("فشل إرسال الفيديو: %s", r.text[:200])
+                    # الطريقة المضمونة: إرسال عبر قناة رفع إن كانت مفعّلة —
+                    # الخادم يعالج الفيديو عند الرفع للقناة فيعمل المشغل الداخلي.
+                    channel_id = db.get_setting("upload_channel_id", "").strip()
+                    if channel_id:
+                        up_kwargs = {}
+                        if probe:
+                            up_kwargs = {
+                                "duration": probe["duration"],
+                                "width": probe["width"],
+                                "height": probe["height"],
+                            }
+                        res = uploader.send_video_via_channel(
+                            channel_id, chat_id, path, caption, **up_kwargs
+                        )
+                        if res is None:
+                            logger.warning("قناة الرفع غير مفعلة فعلياً، إرسال مباشر.")
+                            r = uploader.send_video(chat_id, path, caption, **up_kwargs)
+                            if r.status_code != 200:
+                                logger.error("فشل إرسال الفيديو: %s", r.text[:200])
+                        elif res[0] != 200:
+                            logger.error("فشل الإرسال عبر القناة (%s): %s", res[0], res[1][:200])
+                            raise DownloadError(
+                                "❌ تعذر إرسال الفيديو عبر قناة الرفع. تأكد من ضبطها في لوحة المالك."
+                            )
+                    else:
+                        up_kwargs = {}
+                        if probe:
+                            up_kwargs = {
+                                "duration": probe["duration"],
+                                "width": probe["width"],
+                                "height": probe["height"],
+                            }
+                        r = uploader.send_video(chat_id, path, caption, **up_kwargs)
+                        if r.status_code != 200:
+                            logger.error("فشل إرسال الفيديو: %s", r.text[:200])
                 else:
                     r = uploader.send_audio(chat_id, path, caption, title=title or "أغنية")
                     if r.status_code != 200:

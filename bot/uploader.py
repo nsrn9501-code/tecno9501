@@ -52,6 +52,37 @@ def send_message(chat_id, text):
     )
 
 
+def send_video_via_channel(channel_id, user_chat_id, path, caption, duration=0, width=0, height=0):
+    """يرفع الفيديو إلى قناة أولاً (فيخزّنه ويعالجه سيرفر تيليجرام كفيديو
+    رسمي قابل للبث)، ثم يعيد توجيهه للمستخدم — فيعمل المشغل الداخلي دائماً.
+    يعيد (status, message) — أو None إن لم تُفعّل قناة."""
+    if not channel_id:
+        return None
+    # 1) ارفع للقناة
+    sent = send_video(channel_id, path, caption, duration, width, height)
+    if sent.status_code != 200:
+        return (sent.status_code, sent.text)
+    try:
+        msg = sent.json()["result"]
+        mid = msg["message_id"]
+    except Exception:
+        return (500, "failed to parse channel send")
+    # 2) أعِد توجيهه للمستخدم
+    fwd = forward_message(channel_id, user_chat_id, mid)
+    if fwd.status_code == 200:
+        return (200, "forwarded")
+    return (fwd.status_code, fwd.text)
+
+
+def forward_message(from_chat_id, to_chat_id, message_id):
+    """يعيد توجيه رسالة (فيديو) من قناة إلى المستخدم — يضمن التشغيل الداخلي."""
+    return requests.post(
+        f"{API}/forwardMessage",
+        data={"chat_id": to_chat_id, "from_chat_id": from_chat_id, "message_id": message_id},
+        timeout=120,
+    )
+
+
 def edit_message_text(chat_id, message_id, text):
     """يعدّل نص رسالة الحالة."""
     return requests.post(
