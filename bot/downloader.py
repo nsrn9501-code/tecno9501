@@ -187,7 +187,7 @@ def _ffprobe_info(fp):
     """يعيد معلومات الملف JSON عبر ffprobe، أو None عند الخطأ."""
     r = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries",
-         "format=duration:stream=codec_name,codec_type,width,height,pix_fmt,codec_tag_string,profile",
+         "format=duration,format_name:stream=codec_name,codec_type,width,height,pix_fmt,codec_tag_string,profile",
          "-of", "json", fp],
         capture_output=True, text=True, timeout=30,
     )
@@ -204,6 +204,9 @@ def _video_is_ready(info):
     if not info:
         return False
     fmt = info.get("format") or {}
+    fname = (fmt.get("format_name") or "").lower()
+    if "mp4" not in fname and "mov" not in fname:
+        return False
     try:
         dur = float(fmt.get("duration") or 0)
     except (TypeError, ValueError):
@@ -275,9 +278,10 @@ def ensure_telegram_compatible(path):
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", path,
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-             "-pix_fmt", "yuv420p",
-             "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-             "-movflags", "+faststart", out],
+             "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p",
+             "-tag:v", "avc1",
+             "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+             "-movflags", "+faststart", "-f", "mp4", out],
             capture_output=True, text=True, timeout=600,
         )
         conv_ok = r.returncode == 0 and os.path.exists(out)
@@ -316,3 +320,24 @@ def cleanup_old_files(max_age_hours=24):
 
 class DownloadError(Exception):
     pass
+
+
+def probe_media(path):
+    """يعيد مدة وأبعاد الفيديو (لإرساله كفيديو تفاعلي مكتمل) أو None."""
+    info = _ffprobe_info(path)
+    if not info:
+        return None
+    fmt = info.get("format") or {}
+    try:
+        duration = float(fmt.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    width = height = 0
+    for st in info.get("streams", []):
+        if st.get("codec_type") == "video":
+            width = st.get("width") or 0
+            height = st.get("height") or 0
+            break
+    if not width or not height or duration <= 0:
+        return None
+    return {"duration": int(duration), "width": int(width), "height": int(height)}

@@ -7,7 +7,8 @@ from telegram import InputFile
 
 from . import db
 from .config import POINTS_PER_AUDIO, POINTS_PER_VIDEO, VIP_THRESHOLD
-from .downloader import DownloadError, cleanup, download_audio, download_video, ensure_telegram_compatible
+from .downloader import (DownloadError, cleanup, download_audio, download_video,
+                          ensure_telegram_compatible, probe_media)
 from .handlers.system import esc
 from . import state
 from .state import _USER_BUSY
@@ -82,13 +83,23 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4)؛ إن فشل التحويل
                     # لا نرسل الملف الأصلي التالف بل نبلغ المستخدم.
                     try:
-                        path = await asyncio.to_thread(ensure_telegram_compatible, path)
+                        converted = await asyncio.to_thread(ensure_telegram_compatible, path)
                     except DownloadError as conv_exc:
                         logger.warning("تحويل الفيديو فشل: %s", conv_exc)
                         raise conv_exc
+                    if converted != path:
+                        logger.info("✅ تحويل الفيديو إلى صيغة H.264 التي يدعمها تيليجرام: %s", converted)
+                        path = converted
+                    probe = await asyncio.to_thread(probe_media, path)
+                    kwargs = {"supports_streaming": True, "parse_mode": "HTML"}
+                    if probe:
+                        kwargs.update(
+                            duration=probe["duration"],
+                            width=probe["width"],
+                            height=probe["height"],
+                        )
                     await bot.send_video(
-                        chat_id, video=InputFile(path), caption=caption,
-                        supports_streaming=True, parse_mode="HTML",
+                        chat_id, video=InputFile(path), caption=caption, **kwargs
                     )
                 else:
                     await bot.send_audio(
