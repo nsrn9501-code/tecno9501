@@ -3,7 +3,8 @@ import asyncio
 import logging
 import os
 import traceback
-from telegram import InputFile
+
+from . import uploader
 
 from . import db
 from .config import POINTS_PER_AUDIO, POINTS_PER_VIDEO, VIP_THRESHOLD
@@ -69,12 +70,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     asyncio.to_thread(download_video, url, max_h), timeout=timeout
                 )
 
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_id,
-                text="📦 تم التحميل، جاري الرفع إلى تيليغرام…",
-                parse_mode="HTML",
-            )
+            tool_placeholder_edit1
 
             icon = "🎵" if kind == "audio" else "🎬"
             caption = f"{icon} <b>{esc(title or 'وسائط')}</b>\n<i>via {platform}</i>"
@@ -102,21 +98,20 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                         raise DownloadError(
                             "❌ الفيديو وصل بترميز لا يدعمه تيليجرام وفشل تحويله. جرّب رابطاً آخر."
                         )
-                    kwargs = {"supports_streaming": True, "parse_mode": "HTML"}
+                    up_kwargs = {}
                     if probe:
-                        kwargs.update(
-                            duration=probe["duration"],
-                            width=probe["width"],
-                            height=probe["height"],
-                        )
-                    await bot.send_video(
-                        chat_id, video=InputFile(path), caption=caption, **kwargs
-                    )
+                        up_kwargs = {
+                            "duration": probe["duration"],
+                            "width": probe["width"],
+                            "height": probe["height"],
+                        }
+                    r = uploader.send_video(chat_id, path, caption, **up_kwargs)
+                    if r.status_code != 200:
+                        logger.error("فشل إرسال الفيديو: %s", r.text[:200])
                 else:
-                    await bot.send_audio(
-                        chat_id, audio=InputFile(path), caption=caption,
-                        title=title or "أغنية", parse_mode="HTML",
-                    )
+                    r = uploader.send_audio(chat_id, path, caption, title=title or "أغنية")
+                    if r.status_code != 200:
+                        logger.error("فشل إرسال الصوت: %s", r.text[:200])
             finally:
                 cleanup(path)
 
@@ -127,61 +122,40 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             now = db.get_user(uid) or {}
             logger.info("✅ اكتمل التحميل: %s", title)
             if not was_vip and now.get("is_vip"):
-                await bot.send_message(
+                uploader.send_message(
                     chat_id,
                     f"🎉 <b>مبروك! وصلت إلى {VIP_THRESHOLD} نقطة وأصبحت عضواً VIP!</b>\n"
                     "✅ إلغاء الاشتراك الإجباري\n"
                     "✅ جودة 1080p\n"
                     "✅ أولوية أعلى في التحميل",
-                    parse_mode="HTML",
                 )
             fact_label, fact_text = next_fact(uid)
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_id,
-                text=f"✅ تم!\n⭐ +{points} نقطة (نقاطك: {now.get('points', 0)})\n\n"
-                     f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}",
-                parse_mode="HTML",
-            )
+            uploader.edit_message_text(chat_id, status_id,
+                f"✅ تم!\n⭐ +{points} نقطة (نقاطك: {now.get('points', 0)})\n\n"
+                f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}")
         except asyncio.TimeoutError:
             logger.warning("⏱️ انتهت مهلة التحميل")
             try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=status_id,
-                    text="⏳ انتهت مهلة التحميل (الشبكة بطيئة أو المنصة حجبت الطلب).\n"
-                    "جرّب مرة أخرى بعد قليل، أو أرسل رابطاً آخر.",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                await bot.send_message(
-                    chat_id,
+                uploader.edit_message_text(chat_id, status_id,
                     "⏳ انتهت مهلة التحميل (الشبكة بطيئة أو المنصة حجبت الطلب).\n"
-                    "جرّب مرة أخرى بعد قليل، أو أرسل رابطاً آخر.",
-                )
+                    "جرّب مرة أخرى بعد قليل، أو أرسل رابطاً آخر.")
+            except Exception:
+                uploader.send_message(chat_id,
+                    "⏳ انتهت مهلة التحميل (الشبكة بطيئة أو المنصة حجبت الطلب).\n"
+                    "جرّب مرة أخرى بعد قليل، أو أرسل رابطاً آخر.")
         except DownloadError as exc:
             logger.warning("DownloadError: %s", exc)
             try:
-                await bot.edit_message_text(
-                    chat_id=chat_id, message_id=status_id, text=f"❌ {exc}", parse_mode="HTML"
-                )
+                uploader.edit_message_text(chat_id, status_id, f"❌ {exc}")
             except Exception:
-                await bot.send_message(chat_id, f"❌ {exc}")
+                uploader.send_message(chat_id, f"❌ {exc}")
         except Exception:
             logger.error("Download failed:\n%s", traceback.format_exc())
             try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=status_id,
-                    text="❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.",
-                    parse_mode="HTML",
-                )
+                uploader.edit_message_text(chat_id, status_id, "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.")
             except Exception:
                 try:
-                    await bot.send_message(
-                        chat_id,
-                        "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.",
-                    )
+                    uploader.send_message(chat_id, "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.")
                 except Exception:
                     pass
         finally:
