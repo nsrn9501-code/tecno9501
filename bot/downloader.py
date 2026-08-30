@@ -287,6 +287,7 @@ def _video_is_ready(info):
     vcodec = acodec = None
     width = height = 0
     pix_fmt = None
+    audio_profile = ""
     for st in info.get("streams", []):
         if st.get("codec_type") == "video":
             vcodec = st.get("codec_name")
@@ -295,11 +296,15 @@ def _video_is_ready(info):
             pix_fmt = st.get("pix_fmt")
         elif st.get("codec_type") == "audio" and not acodec:
             acodec = st.get("codec_name")
+            audio_profile = (st.get("profile") or "").lower()
     if vcodec != "h264" or not width or not height:
         return False
     if pix_fmt not in ("yuv420p", "yuvj420p"):
         return False
     if acodec and acodec not in ("aac", "mp3"):
+        return False
+    # HE-AAC / HE-AAC v2 لا يدعمه المشغل الداخلي لتيلىجرام — يحتاج AAC-LC
+    if acodec == "aac" and "he" in audio_profile:
         return False
     return True
 
@@ -316,19 +321,47 @@ def _decode_ok(fp):
         return False
 
 
-def ensure_telegram_compatible(path):
-    """يضمن إرسال فيديو يدعمه تيليجرام نهائياً (MP4 / H.264 / AAC).
+def _safe_limit_mb():
+    """حد آمن أقل من حد تيليجرام (50MB) لضمان التشغيل الداخلي."""
+    return MAX_FILE_SIZE - (2 * 1024 * 1024)  # 48MB
 
-    الطريقة الأساسية: تعبئة (remux) سريعة بنسخ التيارات كما هي إلى حاوية
-    MP4 قياسية مع faststart — وهي نفس الطريقة التي جربناها سابقاً وأثبتت
-    نجاحها. تُستخدم إعادة الترميز الكاملة فقط كحل احتياطي إن فشل النسخ.
-    """
+
+def _ffmpeg_transcode(path, out, extra=None, timeout=900, crf="23"):
+    """أمر ffmpeg قياسي: libx264 + yuv420p + faststart + AAC-LC.
+    يقبل معاملات إضافية (مثل ضبط الأبعاد أو الـ bitrate).
+    crf=None يعني الترميز بوضع bitrate ثابت (لا crf)."""
+    cmd = [
+        "ffmpeg", "-y", "-i", path,
+    ]
+    if extra:
+        cmd.extend(extra)
+    cmd.extend([
+        "-c:v", "libx264", "-preset", "veryfast",
+    ])
+    if crf:
+        cmd.extend(["-crf", crf])
+    cmd.extend([
+        "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p",
+        "-tag:v", "avc1",
+        "-c:a", "aac", "-profile:a", "aac_low",
+        "-b:a", "128k", "-ar", "44100", "-ac", "2",
+        "-movflags", "+faststart", "-f", "mp4", out,
+    ])
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+    return r
+
+
+def ensure_telegram_compatible(path):
+    """يضمن إرسال فيديو يدعمه تيليجرام نهائياً (MP4 / H.264 / AAC-LC / yuv420p / faststart)
+    بحجم لا يتجاوز 48MB حتى يتمكن تيليجرام من تشغيله داخلياً لا كملف خارجي."""
     out = os.path.splitext(path)[0] + "_conv.mp4"
     if os.path.exists(out):
         os.remove(out)
 
-    # 1) التعبئة (remux): نسخ التيارات كما هي إلى MP4 مع faststart.
-    #    هذه هي الطريقة المجرّبة التي كانت ترسل فيديو يدعمه تيليجرام.
+    # 1) التعبئة (remux): نسخ التيارات كما هي إلى MP4 مع faststart — أسرع مسار.
     try:
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", path, "-c", "copy",
@@ -339,34 +372,59 @@ def ensure_telegram_compatible(path):
         r = None
     if r is not None and r.returncode == 0 and os.path.exists(out):
         info = _ffprobe_info(out)
-        # نتأكد أن النسخة أولاً هي H.264 داخل MP4؛ إن لم تكن كذلك نعيد الترميز
+        # نقبل الـ remux فقط إذا كان الملف بالفعل H.264 + AAC-LC + yuv420p + faststart
         if info and _video_is_ready(info):
-            return out
+            size = os.path.getsize(out)
+            if size <= _safe_limit_mb():
+                return out
         if os.path.exists(out):
             os.remove(out)
 
-    # 2) إعادة ترميز كاملة (احتياطي): تحويل أي كوديك (VP9…) إلى H.264 + AAC + yuv420p
-    try:
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-i", path,
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-             "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p",
-             "-tag:v", "avc1",
-             "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
-             "-movflags", "+faststart", "-f", "mp4", out],
-            capture_output=True, text=True, timeout=600,
-        )
-        conv_ok = r.returncode == 0 and os.path.exists(out)
-    except subprocess.TimeoutExpired:
-        conv_ok = False
+    # 2) إعادة ترميز كاملة: تحويل أي كوديك (VP9/AV1…) إلى H.264 + AAC-LC + yuv420p + faststart
+    r = _ffmpeg_transcode(path, out)
+    conv_ok = r is not None and r.returncode == 0 and os.path.exists(out)
+    final_info = _ffprobe_info(out) if conv_ok else None
+    if conv_ok and final_info and _video_is_ready(final_info):
+        size = os.path.getsize(out)
+        if size <= _safe_limit_mb():
+            return out
+        # الحجم كبير: نعيد الترميز بدقة أقل وـ bitrate محدود لضمان التشغيل الداخلي
+        if os.path.exists(out):
+            os.remove(out)
+    else:
+        if os.path.exists(out):
+            os.remove(out)
 
+    # 3) مسار الضغط: دقة ≤720p وbitrate أقصى متحكم به ليبقى الحجم تحت 48MB
+    #    نستخرج مدة الفيديو لنحسب bitrate آمناً.
+    info = _ffprobe_info(path)
+    duration = 0
+    if info:
+        try:
+            duration = float(info.get("format", {}).get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+    vbitrate = 1200  # kbps — جودة جيدة لـ 720p
+    if duration and duration > 0:
+        # نحسب معدل البت المتاح للصوت من الحجم الأقصى (48MB)Less margin
+        total_bitrate_kbps = int((_safe_limit_mb() * 8) / duration / 1000)
+        vbitrate = max(200, min(total_bitrate_kbps - 128, 2500))  # صوت 128k ثابت
+    extra = ["-vf", "scale=-2:'min(720,ih)'", "-b:v", f"{vbitrate}k", "-maxrate", f"{vbitrate}k", "-bufsize", "2M"]
+    r = _ffmpeg_transcode(path, out, extra=extra, crf=None)
+    conv_ok = r is not None and r.returncode == 0 and os.path.exists(out)
     final_info = _ffprobe_info(out) if conv_ok else None
     if not conv_ok or not final_info or not _video_is_ready(final_info):
         if os.path.exists(out):
             os.remove(out)
         raise DownloadError(
-            "❌ المقطع وصل من المنصة بصيغة لا يدعمها تيليجرام، وفشل تحويله تلقائياً.\n"
+            "❌ المقطع وصل من المنصة بصيغة كبيرة/غير مدعومة وفشل تحويله تلقائياً.\n"
             "جرّب رابطاً آخر أو أعد إرساله بعد قليل."
+        )
+    size = os.path.getsize(out)
+    if size > MAX_FILE_SIZE:
+        os.remove(out)
+        raise DownloadError(
+            "❌ حجم الفيديو يتجاوز 50MB ولا يمكن إرساله عبر تيليجرام. جرّب مقطعاً أقصر."
         )
     return out
 
@@ -405,13 +463,18 @@ def probe_media(path):
     except (TypeError, ValueError):
         duration = 0
     width = height = 0
-    vcodec = None
+    vcodec = acodec = acodec_profile = None
     for st in info.get("streams", []):
         if st.get("codec_type") == "video":
             width = st.get("width") or 0
             height = st.get("height") or 0
             vcodec = st.get("codec_name")
-            break
+        elif st.get("codec_type") == "audio" and acodec is None:
+            acodec = st.get("codec_name")
+            acodec_profile = st.get("profile")
     if not width or not height or duration <= 0:
         return None
-    return {"duration": int(duration), "width": int(width), "height": int(height), "vcodec": vcodec}
+    return {
+        "duration": int(duration), "width": int(width), "height": int(height),
+        "vcodec": vcodec, "acodec": acodec, "acodec_profile": acodec_profile,
+    }

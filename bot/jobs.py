@@ -96,7 +96,9 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                             pass
                         path = converted
                     probe = await asyncio.to_thread(probe_media, path)
-                    if not probe or probe.get("vcodec") != "h264":
+                    audio_ok = not probe.get("acodec") or probe.get("acodec") in ("aac", "mp3")
+                    audio_lc = "he" not in (probe.get("acodec_profile") or "").lower()
+                    if (not probe or probe.get("vcodec") != "h264" or not audio_ok or not audio_lc):
                         raise DownloadError(
                             "❌ الفيديو وصل بترميز لا يدعمه تيليجرام وفشل تحويله. جرّب رابطاً آخر."
                         )
