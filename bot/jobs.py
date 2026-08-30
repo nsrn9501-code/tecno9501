@@ -14,7 +14,7 @@ from .downloader import (DownloadError, cleanup, download_audio, download_video,
 from .facts import next_fact
 from .handlers.system import esc
 from . import state
-from .state import _USER_BUSY
+from .state import _USER_BUSY, NUM_WORKERS, get_sem
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +25,27 @@ def enqueue(user_id, coro):
     logger.info("🎯 أُضيفت مهمة إلى الطابور: user=%s seq=%s", user_id, state._job_seq)
 
 async def queue_worker(app):
-    """Processes download jobs; exits when the application stops."""
-    # لا نعتمد على app.running لأنه يكون False وقت post_init،
-    # فيخرج العامل فوراً ولا يعالج أي مهمة. نتوقف فقط عند إلغاء المهمة.
+    """سلوك: يُشغّل عدة عمال (W​orkers) يعالجون المهام بالتوازي،
+    مع سيمافور يحدّ عدد المهام الفعلية المتزامنة حتى لا نُغرق تيليجرام.
+    كل عامل يحترم أولوية VIP من صف الأولوية."""
+    workers = [asyncio.create_task(_worker(app, i)) for i in range(NUM_WORKERS)]
+    try:
+        await asyncio.gather(*workers)
+    except asyncio.CancelledError:
+        for w in workers:
+            w.cancel()
+        raise
+
+
+async def _worker(app, idx):
+    """عامل واحد: يسحب المهام من صف الأولوية وينفذها (تحت السيمافور)."""
     while True:
         try:
             _prio, _seq, coro = await asyncio.wait_for(state._job_queue.get(), timeout=0.5)
             try:
-                await coro()
-            except asyncio.CancelledError:
-                raise
+                # السيمافور يمنع تجاوز عدد المهام المتزامنة الفعلية
+                async with get_sem():
+                    await coro()
             except Exception:
                 logger.error("Job crashed:\n%s", traceback.format_exc())
             finally:
@@ -42,6 +53,7 @@ async def queue_worker(app):
         except asyncio.CancelledError:
             break
         except asyncio.TimeoutError:
+            # لا يوجد مهام في انتظار — نعيد المحاولة
             continue
         except Exception:
             logger.error("Queue error:\n%s", traceback.format_exc())
@@ -162,19 +174,19 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                             f"⏰ المعالجة: {elapsed_so_far:.1f} ثا\n"
                             f"🌐 المصدر: <code>{esc(url)}</code>"
                         )
-                        chan_mid, resp = uploader.upload_video_to_channel(
+                        chan_mid, resp = await uploader.a_upload_video_to_channel(
                             channel_id, path, chan_caption, **up_kwargs
                         )
                         if chan_mid:
                             # ارفع الفيديو للمستخدم بـ copyMessage (بدون metadata للمستخدم)
                             # clean_caption = بدون اسم مستخدم أو أيدي أو حجم
-                            cpy = uploader.copy_message(channel_id, chat_id, chan_mid, caption=caption)
+                            cpy = await uploader.a_copy_message(channel_id, chat_id, chan_mid, caption=caption)
                             sent_ok = (cpy.status_code == 200)
                         else:
                             sent_ok = False
                         if not sent_ok:
                             # حاول إرسال مباشر كخيار أخير
-                            r = uploader.send_video(chat_id, path, caption, **up_kwargs)
+                            r = await uploader.a_send_video(chat_id, path, caption, **up_kwargs)
                             if r.status_code != 200:
                                 logger.error("فشل إرسال الفيديو: %s", r.text[:200])
                                 raise DownloadError(
@@ -188,11 +200,11 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                                 "width": probe["width"],
                                 "height": probe["height"],
                             }
-                        r = uploader.send_video(chat_id, path, caption, **up_kwargs)
+                        r = await uploader.a_send_video(chat_id, path, caption, **up_kwargs)
                         if r.status_code != 200:
                             logger.error("فشل إرسال الفيديو: %s", r.text[:200])
                 else:
-                    r = uploader.send_audio(chat_id, path, caption, title=title or "أغنية")
+                    r = await uploader.a_send_audio(chat_id, path, caption, title=title or "أغنية")
                     if r.status_code != 200:
                         logger.error("فشل إرسال الصوت: %s", r.text[:200])
             finally:
@@ -205,7 +217,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             now = db.get_user(uid) or {}
             logger.info("✅ اكتمل التحميل: %s", title)
             if not was_vip and now.get("is_vip"):
-                uploader.send_message(
+                await uploader.a_send_message(
                     chat_id,
                     f"🎉 <b>مبروك! وصلت إلى {VIP_THRESHOLD} نقطة وأصبحت عضواً VIP!</b>\n"
                     "✅ إلغاء الاشتراك الإجباري\n"
@@ -216,12 +228,12 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             # تأخير بسيط: ننتظر حتى يصل الفيديو للمستخدم أولاً
             await asyncio.sleep(2)
             # تقرير النقاط: رسالة مستقلة
-            uploader.edit_message_text(chat_id, status_id,
+            await uploader.a_edit_message_text(chat_id, status_id,
                 f"✅ تم التحميل!\n⭐ +{points} نقطة (نقاطك الآن: {now.get('points', 0)})")
             # المعلومة: رسالة منفصلة تماماً
             try:
                 await asyncio.sleep(1)
-                uploader.send_message(
+                await uploader.a_send_message(
                     chat_id,
                     f"💡 <b>معلومة {esc(fact_label)}:</b>\n{esc(fact_text)}"
                 )
@@ -230,26 +242,26 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
         except asyncio.TimeoutError:
             logger.warning("⏱️ انتهت مهلة التحميل")
             try:
-                uploader.edit_message_text(chat_id, status_id,
+                await uploader.a_edit_message_text(chat_id, status_id,
                     "⏳ انتهت مهلة التحميل (الشبكة بطيئة أو المنصة حجبت الطلب).\n"
                     "جرّب مرة أخرى بعد قليل، أو أرسل رابطاً آخر.")
             except Exception:
-                uploader.send_message(chat_id,
+                await uploader.a_send_message(chat_id,
                     "⏳ انتهت مهلة التحميل (الشبكة بطيئة أو المنصة حجبت الطلب).\n"
                     "جرّب مرة أخرى بعد قليل، أو أرسل رابطاً آخر.")
         except DownloadError as exc:
             logger.warning("DownloadError: %s", exc)
             try:
-                uploader.edit_message_text(chat_id, status_id, f"❌ {exc}")
+                await uploader.a_edit_message_text(chat_id, status_id, f"❌ {exc}")
             except Exception:
-                uploader.send_message(chat_id, f"❌ {exc}")
+                await uploader.a_send_message(chat_id, f"❌ {exc}")
         except Exception:
             logger.error("Download failed:\n%s", traceback.format_exc())
             try:
-                uploader.edit_message_text(chat_id, status_id, "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.")
+                await uploader.a_edit_message_text(chat_id, status_id, "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.")
             except Exception:
                 try:
-                    uploader.send_message(chat_id, "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.")
+                    await uploader.a_send_message(chat_id, "❌ حدث خطأ غير متوقع أثناء التحميل. حاول لاحقاً.")
                 except Exception:
                     pass
         finally:

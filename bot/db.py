@@ -5,8 +5,11 @@ from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, OWNER_ID, POINTS_
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
+    # وضع WAL يسمح بالقراءة المتزامنة مع الكتابة — أفضل لضغط 200 مستخدم
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 

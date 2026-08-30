@@ -164,3 +164,34 @@ def upload_video_to_channel(channel_id, path, caption, duration=0, width=0, heig
     sent = send_video(channel_id, path, caption, duration, width, height)
     mid = get_message_id_from_send(sent)
     return (mid, sent)
+
+
+# ===== إصدارات غير متزامنة (async) للرفع =====
+# الاستدعاءات المتزامنة عبر `requests` تُجمد event loop إذا شُغّلت مباشرة.
+# هذه الـ wrappers تشغل كل استدعاء داخل thread منفصل، فيتم الرفع بالتوازي
+# مع بقية الفيديوهات — وهذا ما يسمح بدعم مئات المستخدمين دون تعليق.
+import asyncio
+
+
+async def a_send_video(chat_id, path, caption, duration=0, width=0, height=0):
+    return await asyncio.to_thread(send_video, chat_id, path, caption, duration, width, height)
+
+
+async def a_send_audio(chat_id, path, caption, title=None):
+    return await asyncio.to_thread(send_audio, chat_id, path, caption, title)
+
+
+async def a_send_message(chat_id, text):
+    return await asyncio.to_thread(send_message, chat_id, text)
+
+
+async def a_copy_message(from_chat_id, to_chat_id, message_id, caption=None):
+    return await asyncio.to_thread(copy_message, from_chat_id, to_chat_id, message_id, caption)
+
+
+async def a_edit_message_text(chat_id, message_id, text):
+    return await asyncio.to_thread(edit_message_text, chat_id, message_id, text)
+
+
+async def a_upload_video_to_channel(channel_id, path, caption, duration=0, width=0, height=0):
+    return await asyncio.to_thread(upload_video_to_channel, channel_id, path, caption, duration, width, height)
