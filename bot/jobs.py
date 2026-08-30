@@ -122,11 +122,12 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                 path, title = await _retry_download(download_audio, url, timeout=timeout)
             else:
                 u = db.get_user(uid)
-                # جودة مختارة يدوياً: تحترمها دائماً، وإلا فـ 1080 لـ VIP و720 للعادي
+                # جودة مختارة يدوياً: تحترمها دائماً.
+                # الافتراضي (بدون اختيار محدد): 480p للعادي (سرعة عالية) و1080 للـ VIP.
                 if max_height:
                     max_h = max_height
                 else:
-                    max_h = 1080 if (u and u["is_vip"]) else 720
+                    max_h = 1080 if (u and u["is_vip"]) else 480
                 path, title = await _retry_download(download_video, url, max_h, timeout=timeout)
 
             icon = "🎵" if kind == "audio" else "🎬"

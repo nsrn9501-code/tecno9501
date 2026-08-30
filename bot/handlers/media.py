@@ -188,37 +188,26 @@ async def start_download(update, context, url, platform, kind, max_height=None):
 
 
 async def _ask_quality(update, context, url, platform):
-    """يعرض أزرار الجودة المتاحة قبل التحميل (360p/720p/1080p/MP3)."""
+    """يعرض أزرار جودة ثابتة (360p/480p/720p/تلقائي/MP3) بدون فحص الشبكة —
+    لإزالة التأخير وبدء التحميل بسرعة."""
     uid = update.effective_user.id
     chat_id = update.effective_chat.id
     status_msg = await update.message.reply_text(
-        f"✅ تم التعرف على الرابط ({platform}).\n⏳ جاري فحص الجودات المتاحة…",
+        f"✅ تم التعرف على الرابط ({platform}).\n⬇️ اختر الجودة المناسبة 👇",
     )
-    try:
-        qualities = await asyncio.to_thread(downloader.fetch_qualities, url)
-    except Exception:
-        qualities = []
-    if not qualities:
-        # ما في جودات معروفة — أرسل مباشرة كفيديو
-        await start_download(update, context, url, platform, "video")
-        return
     _PENDING_LINKS[uid] = {"url": url, "platform": platform, "kind": "video"}
-    rows = []
-    for i in range(0, len(qualities), 2):
-        row = []
-        for q in qualities[i:i+2]:
-            row.append(InlineKeyboardButton(
-                q["label"], callback_data=f"qual:{q['height']}")
-            )
-        rows.append(row)
-    rows.append([
-        InlineKeyboardButton("⚡ تلقائي", callback_data="qual:auto"),
-        InlineKeyboardButton("❌ إلغاء", callback_data="cancel"),
-    ])
-    lines = "\n".join(f"• {q['label']}" for q in qualities)
+    rows = [
+        [InlineKeyboardButton("360p 📉", callback_data="qual:360"),
+         InlineKeyboardButton("480p 📺", callback_data="qual:480")],
+        [InlineKeyboardButton("720p HD ✨", callback_data="qual:720")],
+        [InlineKeyboardButton("🎵 صوت MP3", callback_data="qual:0")],
+        [InlineKeyboardButton("⚡ تلقائي", callback_data="qual:auto"),
+         InlineKeyboardButton("❌ إلغاء", callback_data="cancel")],
+    ]
     await status_msg.edit_text(
-        f"📥 <b>اختر الجودة:</b>\n{lines}\n\n"
-        "⚡ <b>تلقائي</b> = أفضل جودة حسب رتبتك (VIP: 1080p / عادي: 720p)",
+        f"📥 <b>اختر الجودة:</b>\n\n"
+        "اختر الجودة التي تناسبك وسأرسل لك الفيديو بها مباشرة ⚡\n"
+        "(الجودة الأقل = أسرع تحميل 🚀)",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(rows),
     )

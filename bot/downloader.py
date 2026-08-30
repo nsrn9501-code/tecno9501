@@ -107,7 +107,7 @@ def download_video(url, max_height=1080):
     # أهم أولوية: صيغة معدنية (مدمجة) واحدة بـ H.264 (avc1) بامتداد mp4 —
     # لأنها تشتغل في تيليجرام مباشرة بدون تحويل (كما جربناها سابقاً).
     # وإلا DASH H.264، ثم أي فيديو (يُحوَّل لاحقاً إلى H.264). لا صوت فقط أبداً.
-    fmt = (f"best[vcodec~='^(avc1|h264)'][ext=mp4]"
+    fmt = (f"best[vcodec~='^(avc1|h264)'][ext=mp4][height<=?{max_height}]"
            f"/bestvideo[vcodec~='^(avc1|h264)'][ext=mp4][height<=?{max_height}]+bestaudio"
            f"/bestvideo[ext=mp4][height<=?{max_height}]+bestaudio"
            f"/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
