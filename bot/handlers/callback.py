@@ -83,7 +83,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(
                 f"⏳ جاري التحميل ({label})…", parse_mode=ParseMode.HTML
             )
-            from ..jobs import schedule_download
             await schedule_download(
                 bot=context.bot, chat_id=chat_id, uid=uid, url=link["url"],
                 platform=link["platform"], kind=kind_sel,
