@@ -17,7 +17,6 @@ from .system import (
     fmt_duration,
     get_owner_state,
     looks_like_url,
-    main_keyboard,
     owner_card,
     send_stats_reply,
     vip_bar,

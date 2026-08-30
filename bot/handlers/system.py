@@ -1,13 +1,20 @@
 """دوال مساعدة مشتركة + أزرار النظام الرئيسية. تُستخدم من كافة الوحدات."""
 import html
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from .. import db
 from ..config import OWNER_ID, VIP_THRESHOLD
 from ..state import _OWNER_STATE
+
+
+def _hide_all():
+    """لم تعد هناك لوحة دائمة (تم تحويلها لـ InlineKeyboard) —
+    نعيد None لإزالة أي كيبورد قديم متبقي."""
+    from telegram import ReplyKeyboardRemove
+    return ReplyKeyboardRemove()
 
 
 def esc(text):
@@ -22,27 +29,20 @@ def fmt_duration(sec):
     return f"{m}:{s:02d}"
 
 
-from telegram import ReplyKeyboardRemove
-
-
-def _hide_all():
-    """اخفاء الأزرار تلقائياً بعد كل رد (مثل بوتات أخرى) —
-    ترجعها فقط عبر /start. ·"""
-    return ReplyKeyboardRemove()
-
-
 def main_keyboard(user_id):
-    """لوحة الأزرار النظامية (ReplyKeyboard) الدائمة."""
+    """لوحة الأزرار النظامية (InlineKeyboard) — تختفي تلقائياً عند الرجوع/التمرير."""
     rows = [
-        [KeyboardButton("📥 تحميل/بحث"), KeyboardButton("👤 حسابي")],
-        [KeyboardButton("🎁 مكافأة يومية"), KeyboardButton("🔗 رابط الدعوة")],
-        [KeyboardButton("⭐ نظام الـ VIP"), KeyboardButton("💬 كروب المناقشة")],
-        [KeyboardButton("💡 معلومتي"), KeyboardButton("ℹ️ المساعدة")],
-        [KeyboardButton("👑 المطور")],
+        [InlineKeyboardButton("📥 تحميل/بحث", callback_data="main:download"),
+         InlineKeyboardButton("👤 حسابي", callback_data="main:stats")],
+        [InlineKeyboardButton("🎁 مكافأة يومية", callback_data="main:daily"),
+         InlineKeyboardButton("🔗 رابط الدعوة", callback_data="main:referral")],
+        [InlineKeyboardButton("⭐ نظام الـ VIP", callback_data="main:vip"),
+         InlineKeyboardButton("💬 كروب المناقشة", callback_data="main:discussion")],
+        [InlineKeyboardButton("💡 معلومتي", callback_data="main:fact"),
+         InlineKeyboardButton("ℹ️ المساعدة", callback_data="main:help")],
+        [InlineKeyboardButton("👑 المطور", callback_data="main:owner")],
     ]
-    return ReplyKeyboardMarkup(
-        rows, resize_keyboard=True, is_persistent=True, input_field_placeholder="أرسل رابطاً أو إسم أغنية…"
-    )
+    return InlineKeyboardMarkup(rows)
 
 
 def home_text(user):
