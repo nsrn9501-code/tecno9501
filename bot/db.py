@@ -1,191 +1,299 @@
-import sqlite3
-from contextlib import contextmanager
+"""طبقة تخزين بدون SQLite.
 
-from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, OWNER_ID, POINTS_PER_REFERRAL, VIP_THRESHOLD
+تعتمد على ملف JSON واحد (بديل آمن عن قاعدة SQLite) + قفل في الذاكرة.
+نفس الواجهة البرمجية تماماً (نفس أسماء الدوال ونفس القيم المُعادة)،
+لذلك لا يتغيّر أي شيء في باقي البوت، ويعمل على أي استضافة مجانية
+بدون مشاكل "database is locked".
+
+البيانات تبقى في الذاكرة أثناء التشغيل وتُحفظ في الملف فور كل عملية
+كتابة (كتابة مؤقتة ثم استبدال ذري) حتى لا تضيع النقاط/البيانات عند
+إعادة تشغيل السيرفر.
+"""
+
+import datetime
+import json
+import os
+import secrets
+import threading
+import time
+
+from .config import (
+    DAILY_REWARD_POINTS,
+    DB_PATH,
+    GIFT_POINTS,
+    OWNER_ID,
+    POINTS_PER_REFERRAL,
+    VIP_THRESHOLD,
+)
+
+# مسار ملف التخزين الجديد (JSON) — لا يتعارض مع bot.db القديم إن وُجد
+STORE_PATH = DB_PATH + ".json"
+
+# قفل واحد يمنع أي تداخل بين الخيوط (القراءة والكتابة معاً)
+_LOCK = threading.RLock()
+
+# ---- البنية الحية للبيانات في الذاكرة ----
+_data = {
+    "users": {},            # str(user_id) -> dict (id, username, first_name, points, ...)
+    "downloads": [],        # قائمة سجلات التحميل (id, user_id, kind, title, filesize, created_at)
+    "settings": {},         # key -> value (نصوص)
+    "referrals": [],        # قائمة (id, referrer_id, referee_id, created_at)
+    "daily_rewards": {},    # str(user_id) -> قائمة تواريخ حصل فيها على المكافأة
+    "gift_links": {},       # code -> dict (id, code, owner_id, max_uses, used, active, points, created_at)
+    "gift_uses": [],        # قائمة (link_id, user_id)
+    "daily_usage": {},      # str(user_id) -> {date: {"link": n, "search": n}}
+    "rate_bans": {},        # str(user_id) -> until (epoch float)
+    "user_prefs": {},       # str(user_id) -> {"fact_category": str, "welcomed": 0/1}
+    "_next_id": 1,
+}
+
+_DEFAULT_SETTINGS = {
+    "gift_default_points": "10",
+    "channel_id": "",
+    "channel_name": "",
+    "channel_url": "",
+    "daily_limit_free": "3",
+    "daily_limit_vip": "20",
+    "daily_link_limit_free": "5",
+    "daily_link_limit_vip": "15",
+    "daily_search_limit_free": "5",
+    "daily_search_limit_vip": "15",
+}
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-    conn.row_factory = sqlite3.Row
-    # وضع WAL يسمح بالقراءة المتزامنة مع الكتابة — أفضل لضغط 200 مستخدم
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    return conn
+# ------------------------- أدوات داخلية -------------------------
+
+def _now_iso():
+    """طابع زمني محلي بصيغة نصية قابلة للمقارنة."""
+    return datetime.datetime.now().isoformat(timespec="seconds")
 
 
-@contextmanager
-def cursor():
-    conn = get_conn()
+def _parse_dt(value):
     try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+        return datetime.datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
-def init_db():
-    with cursor() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                points INTEGER DEFAULT 0,
-                is_vip INTEGER DEFAULT 0,
-                is_banned INTEGER DEFAULT 0,
-                invited_by INTEGER,
-                referrals INTEGER DEFAULT 0,
-                total_downloads INTEGER DEFAULT 0,
-                audio_downloads INTEGER DEFAULT 0,
-                video_downloads INTEGER DEFAULT 0,
-                joined_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS downloads (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                kind TEXT,
-                title TEXT,
-                filesize INTEGER,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS referrals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                referrer_id INTEGER,
-                referee_id INTEGER,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS daily_rewards (
-                user_id INTEGER,
-                reward_date TEXT,
-                PRIMARY KEY (user_id, reward_date)
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS gift_links (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT UNIQUE,
-                owner_id INTEGER,
-                max_uses INTEGER,
-                used INTEGER DEFAULT 0,
-                active INTEGER DEFAULT 1,
-                points INTEGER DEFAULT 10,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS gift_uses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                link_id INTEGER,
-                user_id INTEGER,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS daily_usage (
-                user_id INTEGER,
-                usage_date TEXT,
-                usage_type TEXT,
-                count INTEGER DEFAULT 0,
-                PRIMARY KEY (user_id, usage_date, usage_type)
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS rate_bans (
-                user_id INTEGER PRIMARY KEY,
-                until REAL
-            )
-        ''')
-        # migration: add downloads detail columns if missing
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()]
-        if "title" not in cols:
-            conn.execute("ALTER TABLE downloads ADD COLUMN title TEXT")
-        if "filesize" not in cols:
-            conn.execute("ALTER TABLE downloads ADD COLUMN filesize INTEGER")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('gift_default_points', '10')")
-        # Ensure default settings
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_id', '')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_name', '')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_url', '')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_limit_free', '3')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_limit_vip', '20')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_free', '5')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_vip', '15')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_free', '5')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_vip', '15')")
-        _user_prefs_table()
+def _next_id_locked():
+    _data["_next_id"] += 1
+    return _data["_next_id"]
 
 
-# ---- users ----
-def get_user(user_id):
-    with cursor() as conn:
-        row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        return dict(row) if row else None
+def _save_locked():
+    """يحفظ البيانات في ملف JSON (كتابة مؤقتة + استبدال ذري)."""
+    folder = os.path.dirname(STORE_PATH)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    tmp = STORE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(_data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, STORE_PATH)
 
 
-def create_user(user_id, username=None, first_name=None, invited_by=None):
-    credited = False
-    with cursor() as conn:
-        cur = conn.execute(
-            '''
-                INSERT OR IGNORE INTO users (id, username, first_name, invited_by)
-                VALUES (?,?,?,?)
-            ''', (user_id, username, first_name, invited_by),
-        )
-        inserted = cur.rowcount > 0
-        if inserted and invited_by and invited_by != user_id:
-            conn.execute("UPDATE users SET invited_by=? WHERE id=?", (invited_by, user_id))
-            conn.execute("UPDATE users SET points = points + ? WHERE id=?",
-                         (POINTS_PER_REFERRAL, invited_by))
-            conn.execute("UPDATE users SET referrals = referrals + 1 WHERE id=?", (invited_by,))
-            conn.execute("INSERT INTO referrals (referrer_id, referee_id) VALUES (?,?)",
-                         (invited_by, user_id))
-            ref = conn.execute("SELECT points FROM users WHERE id=?", (invited_by,)).fetchone()
-            if ref and ref["points"] >= VIP_THRESHOLD:
-                conn.execute("UPDATE users SET is_vip=1 WHERE id=?", (invited_by,))
-            credited = True
-    return credited
+def _save():
+    with _LOCK:
+        _save_locked()
 
 
-def claim_daily_reward(user_id):
-    """يضيف مكافأة يومية مرة واحدة فقط في اليوم. يعيد True إن نجح."""
-    today = _today()
-    with cursor() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM daily_rewards WHERE user_id=? AND reward_date=?", (user_id, today)
-        ).fetchone()
-        if row:
-            return False
-        conn.execute(
-            "INSERT INTO daily_rewards (user_id, reward_date) VALUES (?,?)", (user_id, today)
-        )
-    add_points(user_id, DAILY_REWARD_POINTS)
+def _empty_store():
+    return {
+        "users": {},
+        "downloads": [],
+        "settings": dict(_DEFAULT_SETTINGS),
+        "referrals": [],
+        "daily_rewards": {},
+        "gift_links": {},
+        "gift_uses": [],
+        "daily_usage": {},
+        "rate_bans": {},
+        "user_prefs": {},
+        "_next_id": 1,
+    }
+
+
+def _load_locked():
+    """يحمل البيانات من الملف؛ أي مفاتيح ناقصة يُعيد إنشاءها افتراضياً."""
+    global _data
+    if not os.path.exists(STORE_PATH):
+        return False
+    try:
+        with open(STORE_PATH, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+    except (OSError, ValueError):
+        return False
+    base = _empty_store()
+    base.update(loaded)
+    for key in _empty_store():
+        if key not in base:
+            base[key] = _empty_store()[key]
+    if not isinstance(base["settings"], dict):
+        base["settings"] = dict(_DEFAULT_SETTINGS)
+    base["settings"].setdefault("gift_default_points", "10")
+    _data = base
     return True
 
 
-def last_daily_claim(user_id):
-    with cursor() as conn:
-        row = conn.execute(
-            "SELECT reward_date FROM daily_rewards WHERE user_id=? ORDER BY reward_date DESC LIMIT 1",
-            (user_id,),
-        ).fetchone()
-        return row["reward_date"] if row else None
+def _migrate_from_sqlite_locked():
+    """مرة واحدة فقط: إن لم يوجد ملف JSON ووُجدت قاعدة SQLite قديمة،
+    ننقل بياناتها إلى التخزين الجديد حتى لا تضيع النقاط/المستخدمون."""
+    if not os.path.exists(DB_PATH):
+        return
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        def rows(table):
+            try:
+                return [dict(r) for r in conn.execute(f"SELECT * FROM {table}").fetchall()]
+            except sqlite3.Error:
+                return []
+
+        users = rows("users")
+        for r in users:
+            _data["users"][str(r["id"])] = {
+                "id": r["id"],
+                "username": r.get("username"),
+                "first_name": r.get("first_name"),
+                "points": r.get("points", 0) or 0,
+                "is_vip": r.get("is_vip", 0) or 0,
+                "is_banned": r.get("is_banned", 0) or 0,
+                "invited_by": r.get("invited_by"),
+                "referrals": r.get("referrals", 0) or 0,
+                "total_downloads": r.get("total_downloads", 0) or 0,
+                "audio_downloads": r.get("audio_downloads", 0) or 0,
+                "video_downloads": r.get("video_downloads", 0) or 0,
+                "joined_at": r.get("joined_at") or _now_iso(),
+            }
+        for r in rows("downloads"):
+            _data["downloads"].append({
+                "id": r.get("id", _next_id_locked()),
+                "user_id": r["user_id"],
+                "kind": r.get("kind", ""),
+                "title": r.get("title"),
+                "filesize": r.get("filesize", 0) or 0,
+                "created_at": r.get("created_at") or _now_iso(),
+            })
+        for r in rows("settings"):
+            _data["settings"][r["key"]] = r.get("value")
+        for r in rows("referrals"):
+            _data["referrals"].append({
+                "id": r.get("id", _next_id_locked()),
+                "referrer_id": r["referrer_id"],
+                "referee_id": r["referee_id"],
+                "created_at": r.get("created_at") or _now_iso(),
+            })
+        for r in rows("daily_rewards"):
+            _data["daily_rewards"].setdefault(str(r["user_id"]), [])
+            _data["daily_rewards"][str(r["user_id"])].append(r["reward_date"])
+        for r in rows("gift_links"):
+            _data["gift_links"][r["code"]] = {
+                "id": r.get("id", _next_id_locked()),
+                "code": r["code"],
+                "owner_id": r["owner_id"],
+                "max_uses": r.get("max_uses", 1) or 1,
+                "used": r.get("used", 0) or 0,
+                "active": r.get("active", 1) or 0,
+                "points": r.get("points", GIFT_POINTS) or GIFT_POINTS,
+                "created_at": r.get("created_at") or _now_iso(),
+            }
+        for r in rows("gift_uses"):
+            _data["gift_uses"].append({"link_id": r["link_id"], "user_id": r["user_id"]})
+        for r in rows("daily_usage"):
+            _data["daily_usage"].setdefault(str(r["user_id"]), {})
+            _data["daily_usage"][str(r["user_id"])].setdefault(r["usage_date"], {})
+            _data["daily_usage"][str(r["user_id"])][r["usage_date"]][r["usage_type"]] = r.get("count", 0) or 0
+        for r in rows("rate_bans"):
+            _data["rate_bans"][str(r["user_id"])] = r["until"]
+        for r in rows("user_prefs"):
+            _data["user_prefs"][str(r["user_id"])] = {
+                "fact_category": r.get("fact_category", "both"),
+                "welcomed": r.get("welcomed", 0) or 0,
+            }
+        # أكبر id موجود لضمان عدم تكرار الأرقام
+        max_ids = [0]
+        max_ids += [u.get("id", 0) or 0 for u in _data["users"].values()]
+        max_ids += [d.get("id", 0) or 0 for d in _data["downloads"]]
+        max_ids += [r.get("id", 0) or 0 for r in _data["referrals"]]
+        max_ids += [g.get("id", 0) or 0 for g in _data["gift_links"].values()]
+        _data["_next_id"] = max(max_ids) + 1
+        conn.close()
+    except Exception:
+        # أي خطأ أثناء النقل لا يمنع الإقلاع أبداً
+        pass
 
 
-def _today():
-    import datetime
-    return datetime.date.today().isoformat()
+# ------------------------- init -------------------------
+
+def init_db():
+    """يحمّل البيانات (أو يبنيها من الصفر) ويضمن الإعدادات الافتراضية."""
+    global _data
+    with _LOCK:
+        if not _load_locked():
+            _data = _empty_store()
+            _migrate_from_sqlite_locked()
+        for key, value in _DEFAULT_SETTINGS.items():
+            _data["settings"].setdefault(key, value)
+        _save_locked()
+
+
+def init_db_prefs():
+    """متوافقة مع الكود القديم — لا تحتاج لأي شيء لأن التفضيلات جزء من JSON."""
+    with _LOCK:
+        _data.setdefault("user_prefs", {})
+        _save_locked()
+
+
+# ------------------------- users -------------------------
+
+def _new_user_locked(user_id, username=None, first_name=None, invited_by=None):
+    return {
+        "id": user_id,
+        "username": username,
+        "first_name": first_name,
+        "points": 0,
+        "is_vip": 0,
+        "is_banned": 0,
+        "invited_by": None if invited_by is None else invited_by,
+        "referrals": 0,
+        "total_downloads": 0,
+        "audio_downloads": 0,
+        "video_downloads": 0,
+        "joined_at": _now_iso(),
+    }
+
+
+def get_user(user_id):
+    with _LOCK:
+        u = _data["users"].get(str(user_id))
+        return dict(u) if u else None
+
+
+def create_user(user_id, username=None, first_name=None, invited_by=None):
+    """ينشئ مستخدماً جديداً؛ يعيد True إن احتُسبت دعوة (نفس السلوك القديم)."""
+    credited = False
+    with _LOCK:
+        key = str(user_id)
+        if key in _data["users"]:
+            return False
+        _data["users"][key] = _new_user_locked(user_id, username, first_name, invited_by)
+        if invited_by and invited_by != user_id and str(invited_by) in _data["users"]:
+            inv = _data["users"][str(invited_by)]
+            _data["users"][key]["invited_by"] = invited_by
+            inv["points"] = inv.get("points", 0) + POINTS_PER_REFERRAL
+            inv["referrals"] = inv.get("referrals", 0) + 1
+            _data["referrals"].append({
+                "id": _next_id_locked(),
+                "referrer_id": invited_by,
+                "referee_id": user_id,
+                "created_at": _now_iso(),
+            })
+            if inv["points"] >= VIP_THRESHOLD:
+                inv["is_vip"] = 1
+            credited = True
+        _save_locked()
+    return credited
 
 
 def get_or_create_user(user_id, username=None, first_name=None, invited_by=None):
@@ -197,20 +305,24 @@ def get_or_create_user(user_id, username=None, first_name=None, invited_by=None)
         u = get_user(user_id)
         credited = is_new
     else:
-        # refresh username/name on interaction
-        with cursor() as conn:
-            conn.execute("UPDATE users SET username=?, first_name=? WHERE id=?",
-                         (username, first_name, user_id))
+        with _LOCK:
+            _data["users"][str(user_id)]["username"] = username
+            _data["users"][str(user_id)]["first_name"] = first_name
+            _save_locked()
         credited = False
     return u, (credited, is_new)
 
 
 def add_points(user_id, points):
-    with cursor() as conn:
-        conn.execute("UPDATE users SET points = points + ? WHERE id=?", (points, user_id))
-        row = conn.execute("SELECT points FROM users WHERE id=?", (user_id,)).fetchone()
-        if row and row["points"] >= VIP_THRESHOLD:
-            conn.execute("UPDATE users SET is_vip = 1 WHERE id=?", (user_id,))
+    with _LOCK:
+        key = str(user_id)
+        u = _data["users"].get(key)
+        if not u:
+            return
+        u["points"] = u.get("points", 0) + points
+        if u["points"] >= VIP_THRESHOLD:
+            u["is_vip"] = 1
+        _save_locked()
 
 
 def is_vip(user_id):
@@ -218,141 +330,182 @@ def is_vip(user_id):
     return bool(u and u["is_vip"])
 
 
+# ------------------------- التحميلات -------------------------
+
 def add_download_stats(user_id, kind, title=None, filesize=0):
-    with cursor() as conn:
-        if kind == "audio":
-            conn.execute("UPDATE users SET audio_downloads = audio_downloads + 1, total_downloads = total_downloads + 1 WHERE id=?", (user_id,))
-        else:
-            conn.execute("UPDATE users SET video_downloads = video_downloads + 1, total_downloads = total_downloads + 1 WHERE id=?", (user_id,))
-        conn.execute(
-            "INSERT INTO downloads (user_id, kind, title, filesize) VALUES (?,?,?,?)",
-            (user_id, kind, title or "تحميل", filesize),
-        )
+    with _LOCK:
+        u = _data["users"].get(str(user_id))
+        if u:
+            if kind == "audio":
+                u["audio_downloads"] = u.get("audio_downloads", 0) + 1
+            else:
+                u["video_downloads"] = u.get("video_downloads", 0) + 1
+            u["total_downloads"] = u.get("total_downloads", 0) + 1
+        _data["downloads"].append({
+            "id": _next_id_locked(),
+            "user_id": user_id,
+            "kind": kind,
+            "title": title or "تحميل",
+            "filesize": filesize or 0,
+            "created_at": _now_iso(),
+        })
+        _save_locked()
 
 
 def recent_downloads(user_id, limit=10):
-    with cursor() as conn:
-        rows = conn.execute(
-            "SELECT * FROM downloads WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit)
-        ).fetchall()
-        return [dict(r) for r in rows]
+    with _LOCK:
+        rows = [dict(d) for d in _data["downloads"] if d["user_id"] == user_id]
+        rows.sort(key=lambda d: d["id"], reverse=True)
+        return rows[:limit]
+
+
+def _since_iso(days=1):
+    return (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat(timespec="seconds")
 
 
 def user_daily_counts(user_id):
-    with cursor() as conn:
-        row = conn.execute("""
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN kind='audio' THEN 1 ELSE 0 END) as audio,
-                SUM(CASE WHEN kind='video' THEN 1 ELSE 0 END) as video
-            FROM downloads WHERE user_id=? AND created_at >= datetime('now','localtime','-1 day')
-        """, (user_id,)).fetchone()
-    return {
-        "total": row["total"] or 0,
-        "audio": row["audio"] or 0,
-        "video": row["video"] or 0,
-    }
+    """عدد التحميلات (الكلي/صوتي/فيديو) خلال آخر 24 ساعة."""
+    with _LOCK:
+        cutoff = _since_iso(1)
+        total = audio = video = 0
+        for d in _data["downloads"]:
+            if d["user_id"] != user_id:
+                continue
+            created = _parse_dt(d.get("created_at"))
+            if created is None or created < _parse_dt(cutoff):
+                continue
+            total += 1
+            if d.get("kind") == "audio":
+                audio += 1
+            else:
+                video += 1
+    return {"total": total, "audio": audio, "video": video}
 
+
+def daily_download_count(user_id, kind=None):
+    with _LOCK:
+        cutoff = _parse_dt(_since_iso(1))
+        count = 0
+        for d in _data["downloads"]:
+            if d["user_id"] != user_id:
+                continue
+            created = _parse_dt(d.get("created_at"))
+            if created is not None and created >= cutoff:
+                count += 1
+    return count
+
+
+# ------------------------- روابط الهدايا -------------------------
 
 def create_gift_link(owner_id, max_uses, points=GIFT_POINTS):
-    import secrets
     code = secrets.token_hex(4)
-    with cursor() as conn:
-        conn.execute(
-            "INSERT INTO gift_links (code, owner_id, max_uses, points) VALUES (?,?,?,?)",
-            (code, owner_id, max_uses, points),
-        )
+    with _LOCK:
+        link = {
+            "id": _next_id_locked(),
+            "code": code,
+            "owner_id": owner_id,
+            "max_uses": max_uses,
+            "used": 0,
+            "active": 1,
+            "points": points,
+            "created_at": _now_iso(),
+        }
+        _data["gift_links"][code] = link
+        _save_locked()
     return code
 
 
 def redeem_gift_link(code, user_id):
-    """يعيد (نجاح، نقاط، رسالة) عند استعمال رابط هدية."""
-    with cursor() as conn:
-        row = conn.execute("SELECT * FROM gift_links WHERE code=?", (code,)).fetchone()
+    """يعيد (نجاح، نقاط، رسالة) عند استعمال رابط هدية (نفس السلوك القديم)."""
+    with _LOCK:
+        row = _data["gift_links"].get(code)
         if not row:
             return False, 0, "الرابط غير صحيح."
         if not row["active"]:
             return False, 0, "هذا الرابط معطّل."
         if row["used"] >= row["max_uses"]:
             return False, 0, "هذا الرابط انتهت صلاحيته (اكتمل عدد الاستخدامات)."
-        already = conn.execute(
-            "SELECT 1 FROM gift_uses WHERE link_id=? AND user_id=?",
-            (row["id"], user_id),
-        ).fetchone()
+        already = any(u["link_id"] == row["id"] and u["user_id"] == user_id for u in _data["gift_uses"])
         if already:
             return False, 0, "لقد استخدمت هذا الرابط من قبل."
-        conn.execute("UPDATE gift_links SET used = used + 1 WHERE id=?", (row["id"],))
-        if row["used"] + 1 >= row["max_uses"]:
-            conn.execute("UPDATE gift_links SET active=0 WHERE id=?", (row["id"],))
-        conn.execute("INSERT INTO gift_uses (link_id, user_id) VALUES (?,?)", (row["id"], user_id))
-    add_points(user_id, row["points"])
-    return True, row["points"], "تم تفعيل الهدية بنجاح!"
+        row["used"] += 1
+        if row["used"] >= row["max_uses"]:
+            row["active"] = 0
+        _data["gift_uses"].append({"link_id": row["id"], "user_id": user_id})
+        points = row["points"]
+        _save_locked()
+    add_points(user_id, points)
+    return True, points, "تم تفعيل الهدية بنجاح!"
 
+
+# ------------------------- الإعدادات -------------------------
 
 def get_setting(key, default=""):
-    with cursor() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        return row["value"] if row else default
+    with _LOCK:
+        return _data["settings"].get(key, default)
 
 
 def set_setting(key, value):
-    with cursor() as conn:
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
+    with _LOCK:
+        _data["settings"][key] = value
+        _save_locked()
 
 
-def daily_download_count(user_id, kind=None):
-    with cursor() as conn:
-        row = conn.execute("""
-            SELECT COUNT(*) as c FROM downloads
-            WHERE user_id=? AND created_at >= datetime('now', 'localtime', '-1 day')
-        """, (user_id,)).fetchone()
-        return row["c"]
-
+# ------------------------- الإحصائيات والتحكم -------------------------
 
 def all_users():
-    with cursor() as conn:
-        rows = conn.execute("SELECT * FROM users ORDER BY total_downloads DESC").fetchall()
-        return [dict(r) for r in rows]
+    with _LOCK:
+        rows = [dict(u) for u in _data["users"].values()]
+        rows.sort(key=lambda u: u.get("total_downloads", 0), reverse=True)
+        return rows
 
 
 def total_stats():
-    with cursor() as conn:
-        users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
-        downloads = conn.execute("SELECT COUNT(*) c FROM downloads").fetchone()["c"]
-        audio = conn.execute("SELECT COUNT(*) c FROM downloads WHERE kind='audio'").fetchone()["c"]
-        video = conn.execute("SELECT COUNT(*) c FROM downloads WHERE kind='video'").fetchone()["c"]
-        vips = conn.execute("SELECT COUNT(*) c FROM users WHERE is_vip=1").fetchone()["c"]
+    with _LOCK:
+        users = len(_data["users"])
+        downloads = len(_data["downloads"])
+        audio = sum(1 for d in _data["downloads"] if d.get("kind") == "audio")
+        video = downloads - audio
+        vips = sum(1 for u in _data["users"].values() if u.get("is_vip"))
     return {"users": users, "downloads": downloads, "audio": audio, "video": video, "vips": vips}
 
 
 def set_vip(user_id, status):
-    with cursor() as conn:
-        conn.execute("UPDATE users SET is_vip=? WHERE id=?", (1 if status else 0, user_id))
+    with _LOCK:
+        u = _data["users"].get(str(user_id))
+        if u:
+            u["is_vip"] = 1 if status else 0
+            _save_locked()
 
 
 def set_banned(user_id, status):
-    with cursor() as conn:
-        conn.execute("UPDATE users SET is_banned=? WHERE id=?", (1 if status else 0, user_id))
+    with _LOCK:
+        u = _data["users"].get(str(user_id))
+        if u:
+            u["is_banned"] = 1 if status else 0
+            _save_locked()
 
 
-# ---- حدود التحميل اليومية: روابط / بحث ----
+# ------------------------- حدود التحميل اليومية -------------------------
+
+def _today():
+    return datetime.date.today().isoformat()
+
+
 def usage_today(user_id, usage_type):
-    with cursor() as conn:
-        row = conn.execute(
-            "SELECT count FROM daily_usage WHERE user_id=? AND usage_date=date('now','localtime') AND usage_type=?",
-            (user_id, usage_type),
-        ).fetchone()
-        return row["count"] if row else 0
+    with _LOCK:
+        day = _data["daily_usage"].get(str(user_id), {}).get(_today(), {})
+        return day.get(usage_type, 0)
 
 
 def increment_usage(user_id, usage_type):
-    with cursor() as conn:
-        conn.execute("""
-            INSERT INTO daily_usage (user_id, usage_date, usage_type, count)
-            VALUES (?, date('now','localtime'), ?, 1)
-            ON CONFLICT(user_id, usage_date, usage_type)
-            DO UPDATE SET count = count + 1
-        """, (user_id, usage_type))
+    with _LOCK:
+        _data["daily_usage"].setdefault(str(user_id), {})
+        _data["daily_usage"][str(user_id)].setdefault(_today(), {})
+        _data["daily_usage"][str(user_id)][_today()][usage_type] = (
+            _data["daily_usage"][str(user_id)][_today()].get(usage_type, 0) + 1
+        )
+        _save_locked()
 
 
 def usage_limit(uid, usage_type):
@@ -386,105 +539,96 @@ def consume_usage(uid, usage_type):
     return True, ""
 
 
-# ---- تقييد السرعة (3 روابط/دقيقة أو تكرار نفس الرابط) ----
-def _normalize_url(url):
-    u = (url or "").strip().split("?")[0].split("#")[0].rstrip("/")
-    return u.lower()
-
+# ------------------------- تقييد السرعة -------------------------
 
 def set_rate_ban(user_id, seconds=1800):
-    until = __import__("time").time() + seconds
-    with cursor() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO rate_bans (user_id, until) VALUES (?,?)", (user_id, until)
-        )
+    until = time.time() + seconds
+    with _LOCK:
+        _data["rate_bans"][str(user_id)] = until
+        _save_locked()
     return until
 
 
 def clear_rate_ban(user_id):
-    with cursor() as conn:
-        conn.execute("DELETE FROM rate_bans WHERE user_id=?", (user_id,))
+    with _LOCK:
+        _data["rate_bans"].pop(str(user_id), None)
+        _save_locked()
 
 
 def get_rate_ban(user_id):
     """يعيد (متبقي_ثواني) أو 0 إن لم يكن مقيّداً."""
     if user_id == OWNER_ID:
         return 0
-    with cursor() as conn:
-        row = conn.execute("SELECT until FROM rate_bans WHERE user_id=?", (user_id,)).fetchone()
-    if not row:
+    with _LOCK:
+        until = _data["rate_bans"].get(str(user_id))
+    if not until:
         return 0
-    left = row["until"] - __import__("time").time()
+    left = until - time.time()
     if left <= 0:
         clear_rate_ban(user_id)
         return 0
     return int(left)
 
 
-# ---- تفضيلات المستخدمين (نوع المعلومة التي يريدها بعد كل تحميل) ----
-def _user_prefs_table():
-    with cursor() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS user_prefs (
-                user_id INTEGER PRIMARY KEY,
-                fact_category TEXT DEFAULT 'both',
-                welcomed INTEGER DEFAULT 0
-            )
-        ''')
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
-        if "welcomed" not in cols:
-            conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
-
-
-def init_db_prefs():
-    """ينشئ جدول تفضيلات المستخدمين (يُستدعى ضمن init_db)."""
-    _user_prefs_table()
-
+# ------------------------- تفضيلات المستخدمين -------------------------
 
 def set_fact_category(user_id, category):
-    _user_prefs_table()
-    with cursor() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO user_prefs (user_id, fact_category) VALUES (?,?)",
-            (user_id, category),
-        )
+    with _LOCK:
+        _data["user_prefs"][str(user_id)] = {"fact_category": category, "welcomed": 0}
+        _save_locked()
 
 
 def get_fact_welcomed(user_id):
-    _user_prefs_table()
-    with cursor() as conn:
-        row = conn.execute(
-            "SELECT welcomed FROM user_prefs WHERE user_id=?", (user_id,)
-        ).fetchone()
-    return bool(row and row["welcomed"])
+    with _LOCK:
+        p = _data["user_prefs"].get(str(user_id))
+        return bool(p and p.get("welcomed"))
 
 
 def mark_fact_welcomed(user_id):
-    _user_prefs_table()
-    with cursor() as conn:
-        conn.execute("UPDATE user_prefs SET welcomed=1 WHERE user_id=?", (user_id,))
+    with _LOCK:
+        p = _data["user_prefs"].get(str(user_id))
+        if p is not None:
+            p["welcomed"] = 1
+            _save_locked()
 
 
 def get_fact_category(user_id):
-    _user_prefs_table()
-    with cursor() as conn:
-        row = conn.execute(
-            "SELECT fact_category FROM user_prefs WHERE user_id=?", (user_id,)
-        ).fetchone()
-    return row["fact_category"] if row else "both"
+    with _LOCK:
+        p = _data["user_prefs"].get(str(user_id))
+        return p["fact_category"] if p else "both"
 
 
-# ---- فهرس تقدم المعلومات (لمنع التكرار) ----
+# ------------------------- فهرس تقدم المعلومات -------------------------
+
 def get_fact_offset(user_id, category):
-    with cursor() as conn:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key=?", (f"fact_offset_{category}_{user_id}",)
-        ).fetchone()
+    with _LOCK:
+        value = _data["settings"].get(f"fact_offset_{category}_{user_id}")
     try:
-        return int(row["value"]) if row and row["value"] else 0
+        return int(value) if value else 0
     except (TypeError, ValueError):
         return 0
 
 
 def set_fact_offset(user_id, category, idx):
     set_setting(f"fact_offset_{category}_{user_id}", str(idx))
+
+
+# ------------------------- المكافأة اليومية -------------------------
+
+def claim_daily_reward(user_id):
+    """يضيف مكافأة يومية مرة واحدة فقط في اليوم. يعيد True إن نجح."""
+    today = _today()
+    with _LOCK:
+        dates = _data["daily_rewards"].setdefault(str(user_id), [])
+        if today in dates:
+            return False
+        dates.append(today)
+        _save_locked()
+    add_points(user_id, DAILY_REWARD_POINTS)
+    return True
+
+
+def last_daily_claim(user_id):
+    with _LOCK:
+        dates = _data["daily_rewards"].get(str(user_id), [])
+        return dates[-1] if dates else None
