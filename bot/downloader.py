@@ -131,55 +131,17 @@ def download_video(url, max_height=1080):
 
 
 def _download_instagram_muxed(url, base_opts, fallback_fmt):
-    """انستغرام يعرض غالباً صيغ DASH (VP9 غالباً) + صيغ معدنية مدمجة (H.264/MP4).
-    نفضّل الصيغة المعدنية المدمجة لأنها H.264 وتشتغل في تيليجرام مباشرة."""
-    # 1) افحص الصيغ المتاحة واجمع أي صيغة معدنية مستقلة (غير DASH)
-    explore = dict(base_opts)
-    explore.pop("format", None)
-    with YoutubeDL(explore) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except Exception as exc:
-            raise DownloadError(f"تعذر الوصول لرابط انستغرام: {exc}")
-    muxed_ids = []
-    for f in info.get("formats") or []:
-        fid = str(f.get("format_id") or "")
-        # صيغة معدنية: معرّف بدون 'dash' وليست DASH صوت فقط (vcodec قد يكون None)
-        if fid and "dash" not in fid.lower() and f.get("vcodec") != "none" and f.get("acodec") != "none":
-            muxed_ids.append(fid)
-    # ترتيب افتراضي لمقادير الجودة غالباً: الأدنى أولاً، نفضّل الأعلى
-    muxed_ids = sorted(set(muxed_ids), key=lambda x: (len(x), x))
-    muxed_ids = muxed_ids[::-1]  # الأعلى أولاً
-
-    last_err = None
-    for fid in muxed_ids:
-        trial = dict(base_opts)
-        trial["format"] = fid
-        try:
-            return _run_clean(platform="instagram", url=url, opts=trial, kind="video", expected_codec="h264")
-        except DownloadError as exc:
-            last_err = exc
-            time.sleep(1)
-
-    # 2) إن لم تتوفر صيغة معدنية: جرّب سلاسل App ID مختلفة مع الصيغة العامة
-    attempts = (
-        {"format": "best[ext=mp4]/best"},
-        {"format": fallback_fmt, "extractor_args": {"instagram": {"app_id": ["124024574287414"]}}},
-        {"format": "best[ext=mp4]/best", "extractor_args": {"instagram": {"app_id": ["567067343352427"]}}},
-        {"format": "best", "extractor_args": {"instagram": {"app_id": ["3698584747777168"]}}},
-    )
-    for i, extra in enumerate(attempts):
-        trial = dict(base_opts)
-        trial.update(extra)
-        try:
-            return _run_clean(platform="instagram", url=url, opts=trial, kind="video", expected_codec="h264")
-        except DownloadError as exc:
-            last_err = exc
-            if i < len(attempts) - 1:
-                time.sleep(2)
-    if last_err:
-        raise last_err
-    raise DownloadError("تعذر تحميل الفيديو من انستغرام.")
+    """انستغرام: محاولة واحدة سريعة فقط بالصيغة الأفضل (H.264/MP4 ضمن الجودة المطلوبة).
+    السرعة أولاً — لا فحص مسبق ولا تجارب متعددة متتالية تستهلك الدقائق."""
+    trial = dict(base_opts)
+    trial["format"] = fallback_fmt
+    try:
+        return _run(platform="instagram", url=url, opts=trial, kind="video")
+    except DownloadError:
+        # محاولة احتياطية واحدة فقط: أي MP4 متاح
+        trial2 = dict(base_opts)
+        trial2["format"] = "best[ext=mp4]/best"
+        return _run(platform="instagram", url=url, opts=trial2, kind="video")
 
 
 def _run(platform, url, opts, kind):
@@ -360,33 +322,24 @@ def _ffmpeg_transcode(path, out, extra=None, timeout=900, crf="24", preset="ultr
 
 
 def ensure_telegram_compatible(path):
-    """يضمن إرسال فيديو يدعمه تيليجرام نهائياً (MP4 / H.264 / AAC-LC / yuv420p / faststart)
-    بحجم لا يتجاوز 48MB حتى يتمكن تيليجرام من تشغيله داخلياً لا كملف خارجي."""
+    """يضمن إرسال فيديو يدعمه تيليجرام، بأسرع مسار ممكن (السرعة أولاً):
+    1) إن كان H.264/MP4 جاهزاً نعيده فوراً دون أي معالجة.
+    2) غيره remux سريع (نسخ الفيديو + إعادة ترميز الصوت فقط).
+    3) غير ذلك ترميز كامل واحد بـ ultrafast 480p كحد أقصى.
+    لا مسارات متعددة بطيئة."""
     out = os.path.splitext(path)[0] + "_conv.mp4"
     if os.path.exists(out):
         os.remove(out)
 
-    # 1) التعبئة (remux): نسخ التيارات كما هي إلى MP4 مع faststart — أسرع مسار.
-    try:
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-i", path, "-c", "copy",
-             "-movflags", "+faststart", out],
-            capture_output=True, text=True, timeout=300,
-        )
-    except subprocess.TimeoutExpired:
-        r = None
-    if r is not None and r.returncode == 0 and os.path.exists(out):
-        info = _ffprobe_info(out)
-        # نقبل الـ remux فقط إذا كان الملف بالفعل H.264 + AAC-LC + yuv420p + faststart
-        if info and _video_is_ready(info):
-            size = os.path.getsize(out)
-            if size <= _safe_limit_mb():
-                return out
-        if os.path.exists(out):
-            os.remove(out)
+    # المسار 1 (الأسرع — صفر معالجة): الملف أصلاً جاهز؟
+    info = _ffprobe_info(path)
+    if info and _video_is_ready(info):
+        size = os.path.getsize(path)
+        if size <= _safe_limit_mb():
+            return path
 
-    # 2) المسار السريع: نسخ الفيديو H.264 كما هو + إعادة ترميز الصوت إلى AAC-LC فقط
-    #    (انستغرام غالباً H.264 + HE-AAC — هذا يحلّها بثوانٍ بدل دقيقة).
+    # المسار 2: remux سريع — نسخ الفيديو H.264 + إعادة ترميز الصوت إلى AAC-LC فقط.
+    # (انستغرام غالباً H.264 + HE-AAC — تُحل في ثوانٍ لا دقائق).
     try:
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", path,
@@ -394,67 +347,32 @@ def ensure_telegram_compatible(path):
              "-c:a", "aac", "-profile:a", "aac_low",
              "-b:a", "128k", "-ar", "44100", "-ac", "2",
              "-threads", "0", "-movflags", "+faststart", "-f", "mp4", out],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=120,
         )
     except subprocess.TimeoutExpired:
         r = None
     if r is not None and r.returncode == 0 and os.path.exists(out):
-        info = _ffprobe_info(out)
-        if info and _video_is_ready(info):
+        obj_info = _ffprobe_info(out)
+        if obj_info and _video_is_ready(obj_info):
             size = os.path.getsize(out)
             if size <= _safe_limit_mb():
-                logger.info("المسار السريع: نسخ الفيديو + AAC-LC → %s", out)
                 return out
         if os.path.exists(out):
             os.remove(out)
 
-    # 3) إعادة ترميز كاملة: تحويل أي كوديك (VP9/AV1…) إلى H.264 + AAC-LC + yuv420p + faststart
-    r = _ffmpeg_transcode(path, out)
-    conv_ok = r is not None and r.returncode == 0 and os.path.exists(out)
-    final_info = _ffprobe_info(out) if conv_ok else None
-    if conv_ok and final_info and _video_is_ready(final_info):
-        size = os.path.getsize(out)
-        if size <= _safe_limit_mb():
-            return out
-        # الحجم كبير: نعيد الترميز بدقة أقل وـ bitrate محدود لضمان التشغيل الداخلي
-        if os.path.exists(out):
-            os.remove(out)
-    else:
-        if os.path.exists(out):
-            os.remove(out)
-
-    # 4) مسار الضغط: دقة ≤720p وbitrate أقصى متحكم به ليبقى الحجم تحت 48MB
-    #    نستخرج مدة الفيديو لنحسب bitrate آمناً.
-    info = _ffprobe_info(path)
-    duration = 0
-    if info:
-        try:
-            duration = float(info.get("format", {}).get("duration") or 0)
-        except (TypeError, ValueError):
-            duration = 0
-    vbitrate = 1200  # kbps — جودة جيدة لـ 720p
-    if duration and duration > 0:
-        # نحسب معدل البت المتاح للصوت من الحجم الأقصى (48MB)Less margin
-        total_bitrate_kbps = int((_safe_limit_mb() * 8) / duration / 1000)
-        vbitrate = max(200, min(total_bitrate_kbps - 128, 2500))  # صوت 128k ثابت
-    extra = ["-vf", "scale=-2:'min(720,ih)'", "-b:v", f"{vbitrate}k", "-maxrate", f"{vbitrate}k", "-bufsize", "2M"]
-    r = _ffmpeg_transcode(path, out, extra=extra, crf=None)
-    conv_ok = r is not None and r.returncode == 0 and os.path.exists(out)
-    final_info = _ffprobe_info(out) if conv_ok else None
-    if not conv_ok or not final_info or not _video_is_ready(final_info):
-        if os.path.exists(out):
-            os.remove(out)
-        raise DownloadError(
-            "❌ المقطع وصل من المنصة بصيغة كبيرة/غير مدعومة وفشل تحويله تلقائياً.\n"
-            "جرّب رابطاً آخر أو أعد إرساله بعد قليل."
-        )
-    size = os.path.getsize(out)
-    if size > MAX_FILE_SIZE:
+    # المسار 3 (الوحيد الثقيل): ترميز كامل واحد بـ ultrafast، دقة ≤480 للسرعة.
+    extra = ["-vf", "scale=-2:'min(480,ih)'", "-crf", "26"]
+    r = _ffmpeg_transcode(path, out, extra=extra)
+    if r is not None and r.returncode == 0 and os.path.exists(out):
+        final_info = _ffprobe_info(out)
+        if final_info and _video_is_ready(final_info):
+            size = os.path.getsize(out)
+            if size <= MAX_FILE_SIZE:
+                return out
+    if os.path.exists(out):
         os.remove(out)
-        raise DownloadError(
-            "❌ حجم الفيديو يتجاوز 50MB ولا يمكن إرساله عبر تيليجرام. جرّب مقطعاً أقصر."
-        )
-    return out
+    # آخر حل: نعيد الملف الأصلي — تيليجرام قد يتعامل معه أحياناً.
+    return path
 
 
 def cleanup(path):

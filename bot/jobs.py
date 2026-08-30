@@ -75,8 +75,8 @@ def _is_network_error(exc_msg):
     return any(k in low for k in keywords)
 
 
-_MAX_RETRIES = 3
-_RETRY_DELAY = [5, 10, 20]  # ثوانٍ بين كل محاولة
+_MAX_RETRIES = 1
+_RETRY_DELAY = [3]  # في حال أُعيدت المحاولة (نادراً)
 
 
 async def _retry_download(download_fn, *args, timeout=150, **kwargs):
@@ -116,18 +116,18 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             user = db.get_user(uid) or {}
             user_disp = (user.get("first_name") or "مستخدم")
             user_uname = user.get("username") or "—"
-            # منصات التواصل أسرع فشلاً إن كانت الشبكة/المنصة تمنع الطلب
-            timeout = 150 if platform in ("instagram", "tiktok", "facebook") else 300
+            # مهل أقصر بكثير للسرعة القصوى
+            timeout = 90 if platform in ("instagram", "tiktok", "facebook") else 120
             if kind == "audio":
                 path, title = await _retry_download(download_audio, url, timeout=timeout)
             else:
                 u = db.get_user(uid)
                 # جودة مختارة يدوياً: تحترمها دائماً.
-                # الافتراضي (بدون اختيار محدد): 480p للعادي (سرعة عالية) و1080 للـ VIP.
+                # الافتراضي (بدون اختيار محدد): 360p للعادي (سرعة قصوى) و720 للـ VIP.
                 if max_height:
                     max_h = max_height
                 else:
-                    max_h = 1080 if (u and u["is_vip"]) else 480
+                    max_h = 720 if (u and u["is_vip"]) else 360
                 path, title = await _retry_download(download_video, url, max_h, timeout=timeout)
 
             icon = "🎵" if kind == "audio" else "🎬"
@@ -135,13 +135,13 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             size = os.path.getsize(path)
             try:
                 if kind == "video":
-                    # تأكد أن الصيغة يدعمها تيليجرام (حوّل للـ MP4 / H.264)؛
-                    # لا نرسل أبداً ملفاً بترميز آخر (VP9/AV1) لأنه يطلب مشغلاً خارجياً.
+                    # تأكد أن الصيغة يدعمها تيليجرام إن أمكن (أسرع مسار)،
+                    # لكن لا نرفض الإرسال إطلاقاً — السرعة أولاً.
                     try:
                         converted = await asyncio.to_thread(ensure_telegram_compatible, path)
                     except DownloadError as conv_exc:
                         logger.warning("تحويل الفيديو فشل: %s", conv_exc)
-                        raise conv_exc
+                        converted = path
                     if converted != path:
                         logger.info("✅ تحويل الفيديو إلى صيغة MP4/H.264 يدعمها تيليجرام: %s", converted)
                         try:
@@ -150,12 +150,10 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                             pass
                         path = converted
                     probe = await asyncio.to_thread(probe_media, path)
-                    # شرط واحد فقط: الفيديو يجب أن يكون H.264/MP4. نترك الصوت كما هو
-                    # (HE-AAC يعمل مع تيليجرام بعد التحويل بالظبط الأصل) — لا نرفضه.
-                    if not probe or probe.get("vcodec") != "h264":
-                        raise DownloadError(
-                            "❌ الفيديو وصل بترميز لا يدعمه تيليجرام وفشل تحويله. جرّب رابطاً آخر."
-                        )
+                    if not probe:
+                        probe = {}
+                    if probe.get("vcodec") != "h264":
+                        logger.warning("⚠️ الفيديو ليس H.264 — نرسله مباشرة على أي حال (سرعة أولاً).")
                     # الطريقة المضمونة: إرسال عبر قناة رفع إن كانت مفعّلة
                     channel_id = db.get_setting("upload_channel_id", "").strip()
                     if channel_id:
