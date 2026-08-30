@@ -32,29 +32,29 @@ def fmt_duration(sec):
 def main_keyboard(user_id):
     """لوحة الأزرار النظامية (InlineKeyboard) — تختفي تلقائياً عند الرجوع/التمرير."""
     rows = [
-        [InlineKeyboardButton("📥 تحميل/بحث", callback_data="main:download"),
-         InlineKeyboardButton("👤 حسابي", callback_data="main:stats")],
-        [InlineKeyboardButton("🎁 مكافأة يومية", callback_data="main:daily"),
+        [InlineKeyboardButton("⬇️ تحميل/بحث", callback_data="main:download"),
+         InlineKeyboardButton("📊 حسابي", callback_data="main:stats")],
+        [InlineKeyboardButton("✨ مكافأة يومية", callback_data="main:daily"),
          InlineKeyboardButton("🔗 رابط الدعوة", callback_data="main:referral")],
-        [InlineKeyboardButton("⭐ نظام الـ VIP", callback_data="main:vip"),
+        [InlineKeyboardButton("💎 نظام الـ VIP", callback_data="main:vip"),
          InlineKeyboardButton("💬 كروب المناقشة", callback_data="main:discussion")],
-        [InlineKeyboardButton("💡 معلومتي", callback_data="main:fact"),
-         InlineKeyboardButton("ℹ️ المساعدة", callback_data="main:help")],
-        [InlineKeyboardButton("👑 المطور", callback_data="main:owner")],
+        [InlineKeyboardButton("🧠 معلومتي", callback_data="main:fact"),
+         InlineKeyboardButton("🧭 المساعدة", callback_data="main:help")],
+        [InlineKeyboardButton("المطور", callback_data="main:owner")],
     ]
     return InlineKeyboardMarkup(rows)
 
 
 def home_text(user):
     return (
-        "أهلاً صديقي!🖤\n\n"
-        "أنا بوت تحميل الوسائط 📥\n\n"
-        "📎 أرسل لي رابط من:\n"
-        "   YouTube ✅\n"
-        "   Instagram ✅\n"
-        "   TikTok ✅\n"
-        "   Facebook ✅\n\n"
-        "🔍 أو أرسل إسم أغنية / مقطع وسأبحث لك على يوتيوب 🎵🎬\n\n"
+        "أهلاً صديقي! ✨\n\n"
+        "أنا بوت تحميل الوسائط 🚀\n\n"
+        "📎 أرسل لي رابطاً من:\n"
+        "   ▶️ YouTube\n"
+        "   📸 Instagram\n"
+        "   🎵 TikTok\n"
+        "   📘 Facebook\n\n"
+        "🔍 أو أرسل اسم أغنية / مقطع وسأبحث لك على يوتيوب 🎶\n\n"
         "استخدم الأزرار بالأسفل 👇"
     )
 

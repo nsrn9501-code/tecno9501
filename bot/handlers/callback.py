@@ -158,7 +158,7 @@ async def _main_menu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
     if action == "download":
         await context.bot.send_message(
             chat_id,
-            "📥 <b>تحميل / بحث</b>\n"
+            "⬇️ <b>تحميل / بحث</b>\n"
             "أرسل رابط فيديو مباشرة للتحميل، أو اكتب إسم أغنية/مقطع وسأبحث لك على يوتيوب.\n\n"
             "✦ <b>الروابط المدعومة:</b>\n"
             "   YouTube ✅\n   Instagram ✅\n   TikTok ✅\n   Facebook ✅",
@@ -206,7 +206,7 @@ async def _main_menu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
         vip_txt = "✅ أنت عضو VIP 👑" if u["is_vip"] else "❌ لست VIP بعد"
         bar = vip_bar(u["points"])
         txt = (
-            "⭐ <b>نظام الـ VIP</b>\n\n"
+            "💎 <b>نظام الـ VIP</b>\n\n"
             "💠 <b>كيف تصير VIP؟</b>\n"
             f"• تحميل فيديو ناجح = +{POINTS_PER_VIDEO} نقاط\n"
             f"• تحميل أغنية ناجحة = +{POINTS_PER_AUDIO} نقاط\n"
@@ -268,7 +268,7 @@ async def _main_menu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
 
     if action == "help":
         txt = (
-            "ℹ️ <b>تعليمات البوت</b>\n\n"
+            "🧭 <b>تعليمات البوت</b>\n\n"
             "📎 <b>تحميل من رابط:</b>\n"
             "أرسل رابط فيديو من يوتيوب / انستغرام / تيك توك / فيسبوك وسأرسله لك.\n\n"
             "🔍 <b>بحث على يوتيوب:</b>\n"

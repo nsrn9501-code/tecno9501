@@ -42,6 +42,8 @@ def _base_opts(platform, outtmpl):
         "retries": 2,
         "fragment_retries": 2,
         "socket_timeout": 20,
+        "concurrent_fragment_downloads": 8,
+        "http_chunk_size": 10 * 1024 * 1024,
     }
     cookie = _cookie_file(platform)
     if cookie:
@@ -328,17 +330,18 @@ def _safe_limit_mb():
     return MAX_FILE_SIZE - (2 * 1024 * 1024)  # 48MB
 
 
-def _ffmpeg_transcode(path, out, extra=None, timeout=900, crf="23"):
+def _ffmpeg_transcode(path, out, extra=None, timeout=900, crf="24", preset="ultrafast"):
     """أمر ffmpeg قياسي: libx264 + yuv420p + faststart + AAC-LC.
     يقبل معاملات إضافية (مثل ضبط الأبعاد أو الـ bitrate).
-    crf=None يعني الترميز بوضع bitrate ثابت (لا crf)."""
+    crf=None يعني الترميز بوضع bitrate ثابت (لا crf).
+    preset=ultrafast = أسرع ترميز ممكن (الأولوية للسرعة على الحجم الصغير)."""
     cmd = [
         "ffmpeg", "-y", "-i", path,
     ]
     if extra:
         cmd.extend(extra)
     cmd.extend([
-        "-c:v", "libx264", "-preset", "veryfast",
+        "-c:v", "libx264", "-preset", preset, "-threads", "0",
     ])
     if crf:
         cmd.extend(["-crf", crf])
@@ -390,7 +393,7 @@ def ensure_telegram_compatible(path):
              "-c:v", "copy",
              "-c:a", "aac", "-profile:a", "aac_low",
              "-b:a", "128k", "-ar", "44100", "-ac", "2",
-             "-movflags", "+faststart", "-f", "mp4", out],
+             "-threads", "0", "-movflags", "+faststart", "-f", "mp4", out],
             capture_output=True, text=True, timeout=300,
         )
     except subprocess.TimeoutExpired:

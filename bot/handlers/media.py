@@ -43,10 +43,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("📥 رسالة من %s: %s", uid, text[:80])
 
     # أزرار النظام
-    if text == "👤 حسابي":
+    if text in ("👤 حسابي", "📊 حسابي", "حسابي"):
         await send_stats_reply(update, context)
         return
-    if text in ("📥 تحميل/بحث", "تحميل/بحث", "📥"):
+    if text in ("📥 تحميل/بحث", "⬇️ تحميل/بحث", "تحميل/بحث", "📥", "⬇️"):
         await update.message.reply_text(
             "📥 <b>تحميل / بحث</b>\n"
             "أرسل رابط فيديو مباشرة للتحميل، أو اكتب إسم أغنية/مقطع وسأبحث لك على يوتيوب.\n\n"
@@ -54,11 +54,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML,
         )
         return
-    if text in ("ℹ️ المساعدة", "مساعدة", "ℹ️"):
+    if text in ("ℹ️ المساعدة", "🧭 المساعدة", "مساعدة", "ℹ️"):
         from .help import cmd_help
         await cmd_help(update, context)
         return
-    if text in ("🎁 مكافأة يومية", "مكافأة", "🎁"):
+    if text in ("🎁 مكافأة يومية", "✨ مكافأة يومية", "مكافأة", "🎁"):
         from .help import cmd_daily
         await cmd_daily(update, context)
         return
@@ -66,17 +66,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from .help import cmd_referral
         await cmd_referral(update, context)
         return
-    if text in ("⭐ نظام الـ VIP", "نظام الـ VIP", "VIP", "⭐"):
+    if text in ("⭐ نظام الـ VIP", "💎 نظام الـ VIP", "نظام الـ VIP", "VIP", "⭐"):
         await _vip_card(update, context)
         return
     if text in ("💬 كروب المناقشة", "كروب المناقشة", "كروب", "💬"):
         await _discussion_group(update, context)
         return
-    if text in ("💡 معلومتي", "معلومتي", "💡"):
+    if text in ("💡 معلومتي", "🧠 معلومتي", "معلومتي", "💡"):
         await _my_fact(update, context)
         return
 
-    if text in ("👑 المطور", "👑 لوحة المطور"):
+    if text in ("👑 المطور", "المطور", "👑 لوحة المطور", "لوحة المطور"):
         if uid == OWNER_ID:
             from .owner import cmd_owner
             await cmd_owner(update, context)
