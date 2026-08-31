@@ -25,7 +25,7 @@ def send_video(chat_id, path, caption, duration=0, width=0, height=0):
         data["height"] = int(height)
     with open(path, "rb") as f:
         files = {"video": (filename, f, "video/mp4")}
-        return requests.post(f"{API}/sendVideo", data=data, files=files, timeout=1200)
+        return requests.post(f"{API}/sendVideo", data=data, files=files, timeout=600)
 
 
 def send_audio(chat_id, path, caption, title=None):
@@ -40,7 +40,7 @@ def send_audio(chat_id, path, caption, title=None):
         data["title"] = title
     with open(path, "rb") as f:
         files = {"audio": (filename, f, "audio/mpeg" if str(path).endswith(".mp3") else "application/octet-stream")}
-        return requests.post(f"{API}/sendAudio", data=data, files=files, timeout=1200)
+        return requests.post(f"{API}/sendAudio", data=data, files=files, timeout=600)
 
 
 def send_message(chat_id, text):
