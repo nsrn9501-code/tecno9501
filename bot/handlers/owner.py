@@ -337,6 +337,22 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             channel_name = raw
             channel_id = raw
 
+        # منع أسماء البوتات — يجب أن تكون قناة حقيقية
+        if channel_name.lower().endswith("bot") and not raw.startswith("-100"):
+            await update.message.reply_text(
+                "❌ <code>@%s</code> اسم بوت وليس قناة!\n\n"
+                "💡 القناة اسمها العادي لا ينتهي بـ <b>bot</b>.\n"
+                "أضمن طريقة: <b>وجّه رسالة من القناة</b> هنا بدل كتابة الاسم.",
+                parse_mode=ParseMode.HTML,
+            ) % channel_name if False else None
+            await update.message.reply_text(
+                f"❌ <code>@{channel_name}</code> اسم بوت وليس قناة!\n\n"
+                "💡 القناة اسمها العادي لا ينتهي بـ <b>bot</b>.\n"
+                "أضمن طريقة: <b>وجّه رسالة من القناة</b> هنا بدل كتابة الاسم.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
         # محاولة get_chat مع إعادة المحاولة
         chat = None
         last_err = ""
