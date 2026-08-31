@@ -29,7 +29,20 @@ def detect_platform(url):
 
 def _cookie_file(platform):
     p = os.path.join(COOKIES_DIR, f"{platform}.txt")
-    return p if os.path.exists(p) else None
+    if os.path.exists(p):
+        return p
+    # إذا ما في ملف كوكيز لكن فيه session ID بالمتغيرات البيئية، ننشئه تلقائياً
+    if platform == "instagram":
+        from .config import INSTAGRAM_SESSION_ID
+        if INSTAGRAM_SESSION_ID:
+            os.makedirs(COOKIES_DIR, exist_ok=True)
+            with open(p, "w") as f:
+                f.write("# Netscape HTTP Cookie File\n")
+                f.write("# Auto-generated from INSTAGRAM_SESSION_ID\n\n")
+                f.write(f".instagram.com\tTRUE\t/\tFALSE\t0\tsessionid\t{INSTAGRAM_SESSION_ID}\n")
+            logger.info("تم إنشاء ملف كوكيز انستغرام تلقائياً من INSTAGRAM_SESSION_ID")
+            return p
+    return None
 
 
 def _base_opts(platform, outtmpl):

@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "bot.db")
