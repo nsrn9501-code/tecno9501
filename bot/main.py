@@ -13,7 +13,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import db, downloader, state
+from . import db, downloader, state, cache
 from .config import BOT_TOKEN, OWNER_ID
 from .handlers import callback
 from .handlers.help import cmd_daily, cmd_help, cmd_referral
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 async def post_init(app: Application):
     db.init_db()
+    cache.init_cache()
     me = await app.bot.get_me()
     app.bot_data["username"] = me.username
     app.bot_data["bot_name"] = me.first_name

@@ -10,6 +10,7 @@ import subprocess
 from yt_dlp import YoutubeDL
 
 from .config import DOWNLOAD_DIR, COOKIES_DIR, MAX_FILE_SIZE
+from . import cache
 
 
 PLATFORM_PATTERNS = [
@@ -52,11 +53,16 @@ def _base_opts(platform, outtmpl):
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        "retries": 2,
-        "fragment_retries": 2,
-        "socket_timeout": 20,
-        "concurrent_fragment_downloads": 8,
-        "http_chunk_size": 10 * 1024 * 1024,
+        "retries": 3,
+        "fragment_retries": 3,
+        "socket_timeout": 30,
+        "concurrent_fragment_downloads": 16,
+        "http_chunk_size": 20 * 1024 * 1024,
+        "extractor_retries": 3,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     }
     cookie = _cookie_file(platform)
     if cookie:
@@ -98,6 +104,10 @@ def download_audio(url):
     platform = detect_platform(url)
     if not platform:
         raise DownloadError("الرابط غير مدعوم.")
+    # فحص الكاش أولاً — إذا الملف موجود نعيده فوراً
+    cached = cache.get_cached(url, "audio")
+    if cached:
+        return cached["path"], cached["title"]
     outtmpl = os.path.join(DOWNLOAD_DIR, f"audio_{os.getpid()}_%(id)s.%(ext)s")
     opts = _base_opts(platform, outtmpl)
     opts.update({
@@ -108,13 +118,21 @@ def download_audio(url):
             "preferredquality": "192",
         }],
     })
-    return _run(platform, url, opts, "audio")
+    result = _run(platform, url, opts, "audio")
+    # تخزين في الكاش بعد التحميل الناجح
+    if result and result[0]:
+        cache.store_in_cache(url, "audio", result[0], result[1])
+    return result
 
 
 def download_video(url, max_height=1080):
     platform = detect_platform(url)
     if not platform:
         raise DownloadError("الرابط غير مدعوم.")
+    quality_ctag = f"max{max_height}"
+    cached = cache.get_cached(url, "video", quality_ctag)
+    if cached:
+        return cached["path"], cached["title"]
     outtmpl = os.path.join(DOWNLOAD_DIR, f"video_{os.getpid()}_%(id)s.%(ext)s")
     opts = _base_opts(platform, outtmpl)
     # أهم أولوية: صيغة معدنية (مدمجة) واحدة بـ H.264 (avc1) بامتداد mp4 —
@@ -130,16 +148,22 @@ def download_video(url, max_height=1080):
         "format_sort": ["res", "vcodec:h264", "ext:mp4:m4a"],
     })
     if platform == "instagram":
-        # انستغرام: نفضّل الصيغة المعدنية المدمجة H.264 دائماً،
-        # ثم نلجأ للصيغة العامة كحل احتياطي مع إعادة ترميز.
-        return _download_instagram_muxed(url, opts, fmt)
+        res = _download_instagram_muxed(url, opts, fmt)
+        if res and res[0]:
+            cache.store_in_cache(url, "video", res[0], res[1], quality_ctag)
+        return res
     try:
-        return _run(platform, url, opts, "video")
+        res = _run(platform, url, opts, "video")
+        if res and res[0]:
+            cache.store_in_cache(url, "video", res[0], res[1], quality_ctag)
+        return res
     except DownloadError:
         if platform in ("tiktok", "facebook"):
-            # بعض المنصات ترفض دمج الصيغ أو الكوكيز، جرب MP4 متاح (أقل عرضة للملفات التالفة)
             opts["format"] = "best[ext=mp4]/best"
-            return _run(platform, url, opts, "video")
+            res = _run(platform, url, opts, "video")
+            if res and res[0]:
+                cache.store_in_cache(url, "video", res[0], res[1], quality_ctag)
+            return res
         raise
 
 

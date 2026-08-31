@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 def enqueue(user_id, coro):
     state._job_seq += 1
     priority = 0 if db.is_vip(user_id) else 1
+    approx_pos = state._job_queue.qsize()
+    state.set_queue_position(user_id, approx_pos)
     state._job_queue.put_nowait((priority, state._job_seq, coro))
     logger.info("🎯 أُضيفت مهمة إلى الطابور: user=%s seq=%s", user_id, state._job_seq)
 
@@ -107,6 +109,12 @@ async def _retry_download(download_fn, *args, timeout=150, **kwargs):
 async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id, max_height=None):
     """جدولة تحميل + رفع للتيليغرام. kind = 'audio' | 'video'."""
     _USER_BUSY[uid] = True
+    queue_size = state._job_queue.qsize() if state._job_queue else 0
+    if queue_size > 2:
+        try:
+            await uploader.a_edit_message_text(chat_id, status_id, "The queue is busy (" + str(queue_size) + " jobs ahead)... Loading...")
+        except Exception:
+            pass
     points = POINTS_PER_VIDEO if kind == "video" else POINTS_PER_AUDIO
 
     async def do_job():
@@ -265,6 +273,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                     pass
         finally:
             _USER_BUSY[uid] = False
+            state.clear_queue_position(uid)
             logger.info("🏁 انتهت مهمة التحميل")
 
     enqueue(uid, do_job)
