@@ -53,6 +53,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(uid),
         )
+        await update.message.reply_text(
+            "👇 الأزرار بالأسفل",
+            reply_markup=persistent_keyboard(),
+        )
         return
 
     # أزرار النظام
@@ -65,6 +69,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "أرسل رابط فيديو مباشرة للتحميل، أو اكتب إسم أغنية/مقطع وسأبحث لك على يوتيوب.\n\n"
             "✦ <b>الروابط المدعومة:</b> YouTube • Instagram • TikTok • Facebook",
             parse_mode=ParseMode.HTML,
+            reply_markup=persistent_keyboard(),
         )
         return
     if text in ("ℹ️ المساعدة", "🧭 المساعدة", "مساعدة", "ℹ️"):
