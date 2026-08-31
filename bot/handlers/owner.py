@@ -420,6 +420,42 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await context.bot.send_message(target_id, "⛔ لقد تم حظرك من استخدام هذا البوت.")
             except Exception:
                 pass
+        return
+
+    elif action == "unrateban":
+        clear_owner_state(uid)
+        target_id = None
+        raw = text.strip()
+        if raw.isdigit():
+            target_id = int(raw)
+        elif raw.startswith("@") and update.message.reply_to_message is None:
+            users = db.all_users()
+            for u in users:
+                if (u["username"] or "").lower() == raw[1:].lower():
+                    target_id = u["id"]
+                    break
+        elif update.message.reply_to_message:
+            target_id = update.message.reply_to_message.from_user.id
+        if not target_id:
+            await update.message.reply_text("❌ لم أجد المستخدم. أرسل ID أو @يوزرنيم أو رد على رسالته.")
+            return
+        remaining = db.get_rate_ban(target_id)
+        if remaining > 0:
+            db.clear_rate_ban(target_id)
+            await update.message.reply_text(
+                f"✅ تم فك التقييد المؤقت عن المستخدم <code>{target_id}</code>.",
+                parse_mode=ParseMode.HTML
+            )
+            try:
+                await context.bot.send_message(target_id, "✅ تم فك التقييد المؤقت عنك. يمكنك استخدام البوت الآن.")
+            except Exception:
+                pass
+        else:
+            await update.message.reply_text(
+                f"ℹ️ المستخدم <code>{target_id}</code> غير مقيّد حالياً.",
+                parse_mode=ParseMode.HTML
+            )
+        return
 
 
 async def owner_cb(q, context, action, uid, chat_id):
