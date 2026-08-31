@@ -51,10 +51,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             home_text(u),
             parse_mode=ParseMode.HTML,
-            reply_markup=main_keyboard(uid),
-        )
-        await update.message.reply_text(
-            "👇 الأزرار بالأسفل",
             reply_markup=persistent_keyboard(),
         )
         return

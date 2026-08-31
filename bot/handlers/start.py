@@ -96,9 +96,5 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         home_text(u),
         parse_mode=ParseMode.HTML,
-        reply_markup=main_keyboard(user.id),
-    )
-    await update.message.reply_text(
-        "🏠اضغط الزر بالأسفل للعودة للقائمة في أي وقت",
         reply_markup=persistent_keyboard(),
     )
