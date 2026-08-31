@@ -234,39 +234,49 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif raw.startswith("https://t.me/"):
             channel_name = raw.replace("https://t.me/", "").split("/")[0]
             channel_id = channel_name
+        elif raw.startswith("-100"):
+            channel_id = raw
+            channel_name = raw
         else:
-            channel_name = ""
+            channel_name = raw
+            channel_id = raw
+        # محاولة مع إعادة المحاولة (HF Spaces بطيء أحياناً)
+        chat = None
+        for attempt in range(3):
+            try:
+                chat = await context.bot.get_chat(channel_id)
+                break
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(1)
+                else:
+                    raise
+        if not chat:
+            await update.message.reply_text("❌ تعذر إيجاد القناة. تأكد من المعرف.")
+            return
+        cid = str(chat.id)
+        uname = chat.username or ""
+        invite_url = ""
         try:
-            chat = await context.bot.get_chat(channel_id)
-            cid = str(chat.id)
-            uname = chat.username or ""
-            invite_url = ""
-            try:
-                invite = await context.bot.create_chat_invite_link(cid)
-                invite_url = invite.invite_link
-            except Exception:
-                pass
-            db.set_setting("channel_id", cid)
-            db.set_setting("channel_name", f"@{uname}" if uname else chat.title or "")
-            db.set_setting("channel_url", invite_url or (f"https://t.me/{uname}" if uname else ""))
-            try:
-                await context.bot.get_chat_member(cid, OWNER_ID)
-                check_ok = "✅"
-            except Exception:
-                check_ok = "⚠️"
-            await context.bot.send_message(
-                OWNER_ID,
-                f"✅ تم تعيين قناة الاشتراك الإجباري:\n"
-                f"🆔 {cid}\n📛 {chat.title or '—'}\n"
-                f"🔗 {invite_url or 'بدون رابط (قناة عامة)'}\n"
-                f"فحص العضوية: {check_ok} (تأكد أن البوت مشرف في القناة)",
-            )
-        except Exception as exc:
-            await context.bot.send_message(
-                OWNER_ID,
-                f"❌ تعذر تعيين القناة: {exc}\n\n"
-                "تأكد أن البوت مشرف في القناة وأن المعرف صحيح.",
-            )
+            invite = await context.bot.create_chat_invite_link(cid)
+            invite_url = invite.invite_link
+        except Exception:
+            pass
+        db.set_setting("channel_id", cid)
+        db.set_setting("channel_name", f"@{uname}" if uname else chat.title or "")
+        db.set_setting("channel_url", invite_url or (f"https://t.me/{uname}" if uname else ""))
+        try:
+            await context.bot.get_chat_member(cid, OWNER_ID)
+            check_ok = "✅"
+        except Exception:
+            check_ok = "⚠️"
+        await update.message.reply_text(
+            f"✅ تم تعيين قناة الاشتراك الإجباري:\n"
+            f"🆔 <code>{cid}</code>\n📛 {chat.title or '—'}\n"
+            f"🔗 {invite_url or 'بدون رابط (قناة عامة)'}\n"
+            f"فحص العضوية: {check_ok} (تأكد أن البوت مشرف في القناة)",
+            parse_mode=ParseMode.HTML,
+        )
     elif action == "points":
         clear_owner_state(uid)
         parts = text.split()
