@@ -48,9 +48,14 @@ async def _handle_owner_all(update, context):
     if uid != OWNER_ID:
         return
     from .handlers.system import get_owner_state
-    if get_owner_state(uid):
-        from .handlers.owner import handle_owner_input
-        await handle_owner_input(update, context)
+    state = get_owner_state(uid)
+    if state:
+        logger.info("👑 المالك في حالة: %s — معالجة الرسالة", state)
+        try:
+            from .handlers.owner import handle_owner_input
+            await handle_owner_input(update, context)
+        except Exception as e:
+            logger.error("❌ خطأ في handle_owner_input: %s", e)
 
 
 def build_app():
