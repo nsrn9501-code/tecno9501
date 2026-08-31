@@ -113,20 +113,28 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         target_ids = [u["id"] for u in users if not u["is_banned"]]
         sent = 0
         failed = 0
+        pinned = 0
         await update.message.reply_text(
             f"📌 جاري إرسال الإذاعة المثبتة إلى {len(target_ids)} مستخدم…"
         )
         for tid in target_ids:
             try:
-                await context.bot.copy_message(
+                msg = await context.bot.copy_message(
                     chat_id=tid, from_chat_id=chat_id, message_id=update.message.message_id
                 )
                 sent += 1
+                try:
+                    await context.bot.pin_chat_message(
+                        chat_id=tid, message_id=msg.message_id
+                    )
+                    pinned += 1
+                except Exception:
+                    pass
             except Exception:
                 failed += 1
             await asyncio.sleep(0.05)
         # إن وُجدت قناة، ننشر ونثبت منشوراً فيها أيضاً
-        pinned = ""
+        channel_pinned = ""
         if channel_id:
             try:
                 sent_msg = await context.bot.copy_message(
@@ -136,14 +144,14 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     await context.bot.pin_chat_message(
                         chat_id=channel_id, message_id=sent_msg.message_id
                     )
-                    pinned = "\n📌 تم أيضاً تثبيتها في القناة."
+                    channel_pinned = "\n📌 تم تثبيتها في القناة أيضاً."
                 except Exception:
-                    pinned = "\n📨 نُشرت بالقناة لكن تعذر تثبيتها."
+                    pass
             except Exception:
-                pinned = ""
+                pass
         await context.bot.send_message(
             OWNER_ID,
-            f"✅ تمت الإذاعة المثبتة:\n✓ نجح: {sent}\n✗ فشل: {failed}{pinned}",
+            f"✅ تمت الإذاعة المثبتة:\n✓ نجح: {sent}\n📌 مثبتة: {pinned}\n✗ فشل: {failed}{channel_pinned}",
         )
     elif action == "limits":
         clear_owner_state(uid)
