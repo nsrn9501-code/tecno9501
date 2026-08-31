@@ -73,11 +73,6 @@ def build_app():
         .build()
     )
 
-    # Holder for owner forwarded messages (catch ALL message types)
-    app.add_handler(MessageHandler(
-        filters.ALL & ~filters.COMMAND & filters.User(user_id=OWNER_ID),
-        _handle_owner_all,
-    ), group=-1)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("daily", cmd_daily))
