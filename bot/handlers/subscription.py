@@ -13,36 +13,37 @@ logger = logging.getLogger(__name__)
 
 async def sub_status(bot, user_id):
     """يعيد 'ok' أو 'no' (مالك أو VIP = ok دوماً)."""
-    if user_id == OWNER_ID:
-        return "ok"
-    channels = db.get_subscription_channels()
-    if not channels:
-        return "ok"
-    if db.is_vip(user_id):
-        return "ok"
-    # فحص كل القنوات — لازم يكون مشترك بكل واحدة
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(chat_id=ch["id"], user_id=user_id)
-            if member.status not in ("member", "administrator", "creator"):
+    try:
+        if user_id == OWNER_ID:
+            return "ok"
+        channels = db.get_subscription_channels()
+        if not channels:
+            return "ok"
+        if db.is_vip(user_id):
+            return "ok"
+        for ch in channels:
+            try:
+                member = await bot.get_chat_member(chat_id=ch["id"], user_id=user_id)
+                if member.status not in ("member", "administrator", "creator"):
+                    return "no"
+            except Exception as e:
+                logger.warning("⚠️ فشل فحص القناة %s (%s) للمستخدم %s: %s", ch["name"], ch["id"], user_id, e)
+                now = time.time()
+                if now - _LAST_OWNER_NOTIFY.get(f"channel:{ch['id']}", 0) > 300:
+                    _LAST_OWNER_NOTIFY[f"channel:{ch['id']}"] = now
+                    try:
+                        await bot.send_message(
+                            OWNER_ID,
+                            f"⚠️ تعذر فحص القناة {ch['name']} ({ch['id']}).\n"
+                            "تأكد أن البوت مشرف فيها والمعرف صحيح.",
+                        )
+                    except Exception:
+                        pass
                 return "no"
-        except Exception as e:
-            logger.warning("⚠️ فشل فحص القناة %s (%s) للمستخدم %s: %s", ch["name"], ch["id"], user_id, e)
-            # إذا البوت ما يقدر يتحقق = القناة غلط أو البوت مش مشرف
-            # نطلب الاشتراك (لا نترك الباب مفتوح)
-            now = time.time()
-            if now - _LAST_OWNER_NOTIFY.get(f"channel:{ch['id']}", 0) > 300:
-                _LAST_OWNER_NOTIFY[f"channel:{ch['id']}"] = now
-                try:
-                    await bot.send_message(
-                        OWNER_ID,
-                        f"⚠️ تعذر فحص القناة {ch['name']} ({ch['id']}).\n"
-                        "تأكد أن البوت مشرف فيها والمعرف صحيح.",
-                    )
-                except Exception:
-                    pass
-            return "no"
-    return "ok"
+        return "ok"
+    except Exception as e:
+        logger.error("❌ خطأ حرج في sub_status: %s", e)
+        return "ok"
 
 
 async def join_prompt(bot, user_id, chat_id):

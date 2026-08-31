@@ -112,10 +112,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # اشتراك إجباري
     from .subscription import check_limits, join_prompt, sub_status
-    status = await sub_status(context.bot, uid)
-    if status != "ok":
-        await join_prompt(context.bot, uid, chat_id)
-        return
+    try:
+        status = await sub_status(context.bot, uid)
+        if status != "ok":
+            await join_prompt(context.bot, uid, chat_id)
+            return
+    except Exception as e:
+        logger.error("❌ خطأ في فحص الاشتراك للمستخدم %s: %s", uid, e)
 
     # تقييد مؤقت 30 دقيقة لمن أرسل روابط كثيرة/مكررة
     left = db.get_rate_ban(uid)

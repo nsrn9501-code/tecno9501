@@ -1,4 +1,5 @@
 """معالجة الـ inline callbacks + أمر الإلغاء."""
+import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -10,6 +11,8 @@ from ..state import _OWNER_STATE, _PENDING_LINKS, _SEARCH_RESULTS, _USER_BUSY
 from .owner import owner_cb
 from .subscription import check_limits, sub_status
 from .system import esc
+
+logger = logging.getLogger(__name__)
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,13 +61,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "verify:sub":
-        status = await sub_status(context.bot, uid)
-        if status == "ok":
-            await q.edit_message_text(
-                "✅ تم التحقق بنجاح! أرسل رابطاً للتحميل أو إسم أغنية للبحث.",
-            )
-        else:
-            await q.answer("❌ لست مشتركاً بعد!", show_alert=True)
+        try:
+            status = await sub_status(context.bot, uid)
+            if status == "ok":
+                await q.edit_message_text(
+                    "✅ تم التحقق بنجاح! أرسل رابطاً للتحميل أو إسم أغنية للبحث.",
+                )
+            else:
+                await q.answer("❌ لست مشتركاً بعد! تأكد من الاشتراك بجميع القنوات.", show_alert=True)
+        except Exception as e:
+            logger.error("❌ خطأ في verify:sub للمستخدم %s: %s", uid, e)
+            await q.answer("❌ حدث خطأ، حاول لاحقاً.", show_alert=True)
         return
 
     if data.startswith("qual:"):
