@@ -1,38 +1,26 @@
 import sqlite3
-import os
-import threading
 from contextlib import contextmanager
 
 from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, OWNER_ID, POINTS_PER_REFERRAL, VIP_THRESHOLD
 
-# قفل عام يمنع تنفيذ أكثر من معاملة كتابة واحدة في نفس الوقت،
-# ويحل مشكلة "database is locked" على السيرفرات (مع ملفات SQLite مشتركة).
-_WRITE_LOCK = threading.RLock()
-
 
 def get_conn():
-    # نضمن وجود المجلد قبل فتح القاعدة (يمنع "unable to open database file")
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    # timeout أعلى يمنح الاتصالات فسحة أطول بانتظار تحرير القفل
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=60)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     # وضع WAL يسمح بالقراءة المتزامنة مع الكتابة — أفضل لضغط 200 مستخدم
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
-    # وقت انتظار القفل داخل SQLite بالمللي ثانية
-    conn.execute("PRAGMA busy_timeout=15000;")
     return conn
 
 
 @contextmanager
 def cursor():
-    with _WRITE_LOCK:
-        conn = get_conn()
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+    conn = get_conn()
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -136,7 +124,7 @@ def init_db():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_vip', '15')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_free', '5')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_vip', '15')")
-        _user_prefs_table(conn)
+        _user_prefs_table()
 
 
 # ---- users ----
@@ -434,26 +422,18 @@ def get_rate_ban(user_id):
 
 
 # ---- تفضيلات المستخدمين (نوع المعلومة التي يريدها بعد كل تحميل) ----
-def _user_prefs_table(conn=None):
-    # يُستدعى بالاتصال الموجود أثناء init_db لتجنّب قفل القاعدة على نفسها
-    if conn is None:
-        with cursor() as c:
-            _create_prefs(c)
-    else:
-        _create_prefs(conn)
-
-
-def _create_prefs(conn):
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS user_prefs (
-            user_id INTEGER PRIMARY KEY,
-            fact_category TEXT DEFAULT 'both',
-            welcomed INTEGER DEFAULT 0
-        )
-    ''')
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
-    if "welcomed" not in cols:
-        conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
+def _user_prefs_table():
+    with cursor() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_prefs (
+                user_id INTEGER PRIMARY KEY,
+                fact_category TEXT DEFAULT 'both',
+                welcomed INTEGER DEFAULT 0
+            )
+        ''')
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
+        if "welcomed" not in cols:
+            conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
 
 
 def init_db_prefs():
