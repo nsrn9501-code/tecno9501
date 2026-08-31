@@ -12,6 +12,9 @@ from yt_dlp import YoutubeDL
 from .config import DOWNLOAD_DIR, COOKIES_DIR, MAX_FILE_SIZE
 from . import cache
 
+# تعطيل البروكسي على HuggingFace Spaces (يسبب خطأ 403 Forbidden)
+for _v in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy'):
+    os.environ.pop(_v, None)
 
 PLATFORM_PATTERNS = [
     ("youtube", r"(youtube\.com|youtu\.be)"),
@@ -53,12 +56,14 @@ def _base_opts(platform, outtmpl):
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
+        "socket_timeout": 45,
         "concurrent_fragment_downloads": 16,
         "http_chunk_size": 20 * 1024 * 1024,
-        "extractor_retries": 3,
+        "extractor_retries": 5,
+        "proxy": "",
+        "geo_bypass": True,
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",

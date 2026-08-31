@@ -17,10 +17,13 @@ from .system import (
     fmt_duration,
     get_owner_state,
     looks_like_url,
+    main_keyboard,
     owner_card,
+    persistent_keyboard,
     send_stats_reply,
     vip_bar,
 )
+from .system import home_text
 from ..config import (
     DAILY_REWARD_POINTS,
     POINTS_PER_AUDIO,
@@ -41,6 +44,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     chat_id = update.effective_chat.id
     logger.info("📥 رسالة من %s: %s", uid, text[:80])
+
+    # زر القائمة الرئيسية الدائم
+    if text in ("🏠 القائمة الرئيسية", "القائمة الرئيسية", "🏠"):
+        u, _ = db.get_or_create_user(uid, user.username, user.first_name)
+        await update.message.reply_text(
+            home_text(u),
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_keyboard(uid),
+        )
+        return
 
     # أزرار النظام
     if text in ("👤 حسابي", "📊 حسابي", "حسابي"):

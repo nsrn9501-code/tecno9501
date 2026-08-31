@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 
 from .. import db
 from ..config import OWNER_ID, POINTS_PER_REFERRAL
-from .system import esc, home_text, main_keyboard
+from .system import esc, home_text, main_keyboard, persistent_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -97,4 +97,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         home_text(u),
         parse_mode=ParseMode.HTML,
         reply_markup=main_keyboard(user.id),
+    )
+    await update.message.reply_text(
+        "🏠اضغط الزر بالأسفل للعودة للقائمة في أي وقت",
+        reply_markup=persistent_keyboard(),
     )

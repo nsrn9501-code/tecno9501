@@ -1,7 +1,7 @@
 """دوال مساعدة مشتركة + أزرار النظام الرئيسية. تُستخدم من كافة الوحدات."""
 import html
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
@@ -11,10 +11,17 @@ from ..state import _OWNER_STATE
 
 
 def _hide_all():
-    """لم تعد هناك لوحة دائمة (تم تحويلها لـ InlineKeyboard) —
-    نعيد None لإزالة أي كيبورد قديم متبقي."""
-    from telegram import ReplyKeyboardRemove
-    return ReplyKeyboardRemove()
+    """إرجاع كيبورد دائمي بزر القائمة."""
+    return persistent_keyboard()
+
+
+def persistent_keyboard():
+    """لوحة مفاتيح دائمة ثابتة في الأسفل — تختفي عند التمرير."""
+    return ReplyKeyboardMarkup(
+        [["🏠 القائمة الرئيسية"]],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
 
 
 def esc(text):
