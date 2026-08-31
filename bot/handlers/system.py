@@ -10,11 +10,6 @@ from ..config import OWNER_ID, VIP_THRESHOLD
 from ..state import _OWNER_STATE
 
 
-def _hide_all():
-    """إرجاع كيبورد دائمي بزر القائمة."""
-    return persistent_keyboard()
-
-
 def persistent_keyboard():
     """لوحة مفاتيح دائمة ثابتة في الأسفل — كل الأزرار متاحة دائماً."""
     return ReplyKeyboardMarkup(

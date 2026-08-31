@@ -251,7 +251,7 @@ async def _vip_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👑 الحالة: {vip_txt}"
     )
     await update.message.reply_text(
-        txt, parse_mode=ParseMode.HTML, reply_markup=_hide_all()
+        txt, parse_mode=ParseMode.HTML, reply_markup=persistent_keyboard()
     )
 
 
@@ -266,12 +266,12 @@ async def _discussion_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "انضم إلينا وتواصل مع الأعضاء والإدارة 👇\n"
             f"{link}",
             parse_mode=ParseMode.HTML,
-            reply_markup=_hide_all(),
+            reply_markup=persistent_keyboard(),
         )
     else:
         await update.message.reply_text(
             "💬 لم يتم تعيين كروب مناقشة بعد، حاول لاحقاً.",
-            reply_markup=_hide_all(),
+            reply_markup=persistent_keyboard(),
         )
 
 
