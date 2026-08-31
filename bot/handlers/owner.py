@@ -52,7 +52,10 @@ def owner_keyboard():
                 InlineKeyboardButton("🎁 رابط هدية", callback_data="own:gift"),
                 InlineKeyboardButton("👥 أفضل المستخدمين", callback_data="own:top"),
             ],
-            [InlineKeyboardButton("📥 حدود التحميل", callback_data="own:limits")],
+            [
+                InlineKeyboardButton("🔓 فك التقييد المؤقت", callback_data="own:unrateban"),
+                InlineKeyboardButton("📥 حدود التحميل", callback_data="own:limits"),
+            ],
             [
                 InlineKeyboardButton("🛑 إيقاف البوت", callback_data="own:off"),
                 InlineKeyboardButton("🔄 تشغيل البوت", callback_data="own:on"),
@@ -555,6 +558,13 @@ async def owner_cb(q, context, action, uid, chat_id):
                 f"{u['points']} نقطة | {u['total_downloads']} تحميل"
             )
         await q.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    elif action == "unrateban":
+        set_owner_state(uid, "unrateban")
+        await q.message.reply_text(
+            "🔓 أرسل ID المستخدم أو @يوزرنيم لفك التقييد المؤقت.\n"
+            "أو رد على رسالة المستخدم.\n"
+            "لإلغاء: /cancel"
+        )
     elif action == "off":
         await q.message.reply_text("🛑 جاري إيقاف البوت…")
         asyncio.create_task(_shutdown(context.application))
