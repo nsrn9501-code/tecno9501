@@ -62,6 +62,9 @@ def build_app():
         .defaults(defaults)
         .post_init(post_init)
         .concurrent_updates(True)
+        .read_timeout(60)
+        .write_timeout(60)
+        .connect_timeout(30)
         .build()
     )
 
