@@ -5,11 +5,11 @@ from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, OWNER_ID, POINTS_
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=60)
     conn.row_factory = sqlite3.Row
-    # وضع WAL يسمح بالقراءة المتزامنة مع الكتابة — أفضل لضغط 200 مستخدم
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout=10000;")
     return conn
 
 
@@ -124,7 +124,17 @@ def init_db():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_vip', '15')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_free', '5')")
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_vip', '15')")
-        _user_prefs_table()
+        # user_prefs table — same connection to avoid lock
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_prefs (
+                user_id INTEGER PRIMARY KEY,
+                fact_category TEXT DEFAULT 'both',
+                welcomed INTEGER DEFAULT 0
+            )
+        ''')
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
+        if "welcomed" not in cols:
+            conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
 
 
 # ---- users ----
@@ -423,17 +433,25 @@ def get_rate_ban(user_id):
 
 # ---- تفضيلات المستخدمين (نوع المعلومة التي يريدها بعد كل تحميل) ----
 def _user_prefs_table():
-    with cursor() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS user_prefs (
-                user_id INTEGER PRIMARY KEY,
-                fact_category TEXT DEFAULT 'both',
-                welcomed INTEGER DEFAULT 0
-            )
-        ''')
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
-        if "welcomed" not in cols:
-            conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
+    import time
+    for attempt in range(5):
+        try:
+            with cursor() as conn:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS user_prefs (
+                        user_id INTEGER PRIMARY KEY,
+                        fact_category TEXT DEFAULT 'both',
+                        welcomed INTEGER DEFAULT 0
+                    )
+                ''')
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
+                if "welcomed" not in cols:
+                    conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
+            return
+        except Exception:
+            time.sleep(0.5 * (attempt + 1))
 
 
 def init_db_prefs():
