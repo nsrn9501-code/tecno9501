@@ -10,6 +10,7 @@ from telegram.ext import (
     CommandHandler,
     Defaults,
     MessageHandler,
+    StopPropagation,
     filters,
 )
 
@@ -56,6 +57,7 @@ async def _handle_owner_all(update, context):
             await handle_owner_input(update, context)
         except Exception as e:
             logger.error("❌ خطأ في handle_owner_input: %s", e)
+        raise StopPropagation
 
 
 def build_app():
