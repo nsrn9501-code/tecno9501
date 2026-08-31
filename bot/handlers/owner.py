@@ -33,6 +33,9 @@ def owner_keyboard():
                 InlineKeyboardButton("📌 إذاعة مثبتة", callback_data="own:pin"),
             ],
             [
+                InlineKeyboardButton("📢 إذاعة للقنوات", callback_data="own:broadcast_channels"),
+            ],
+            [
                 InlineKeyboardButton("🔐 قناة الاشتراك", callback_data="own:channel"),
                 InlineKeyboardButton("⚙️ الإعدادات", callback_data="own:settings"),
             ],
@@ -152,6 +155,42 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await context.bot.send_message(
             OWNER_ID,
             f"✅ تمت الإذاعة المثبتة:\n✓ نجح: {sent}\n📌 مثبتة: {pinned}\n✗ فشل: {failed}{channel_pinned}",
+        )
+    elif action == "broadcast_channels":
+        clear_owner_state(uid)
+        channels_to_broadcast = []
+        for ch in db.get_subscription_channels():
+            channels_to_broadcast.append(ch)
+        upload_id = db.get_setting("upload_channel_id", "")
+        upload_name = db.get_setting("upload_channel_name", "")
+        if upload_id:
+            if not any(c["id"] == upload_id for c in channels_to_broadcast):
+                channels_to_broadcast.append({"id": upload_id, "name": upload_name, "url": ""})
+        if not channels_to_broadcast:
+            await update.message.reply_text(
+                "❌ لا توجد قنوات محفوظة. أضف قنوات اشتراك أو قناة رفع أولاً."
+            )
+            return
+        sent = 0
+        failed = 0
+        await update.message.reply_text(
+            f"📢 جاري الإرسال إلى {len(channels_to_broadcast)} قناة…"
+        )
+        for ch in channels_to_broadcast:
+            try:
+                await context.bot.copy_message(
+                    chat_id=ch["id"],
+                    from_chat_id=chat_id,
+                    message_id=update.message.message_id,
+                )
+                sent += 1
+            except Exception as e:
+                failed += 1
+                logger.warning("فشل الإذاعة للقناة %s: %s", ch["name"], e)
+            await asyncio.sleep(0.5)
+        await context.bot.send_message(
+            OWNER_ID,
+            f"✅ تمت إذاعة القنوات:\n✓ نجح: {sent}\n✗ فشل: {failed}\n📊 إجمالي القنوات: {len(channels_to_broadcast)}",
         )
     elif action == "limits":
         clear_owner_state(uid)
@@ -573,6 +612,12 @@ async def owner_cb(q, context, action, uid, chat_id):
         await q.message.reply_text(
             "📌 أرسل الرسالة (نص أو وسائط) وسأرسلها لجميع المستخدمين.\n"
             "إن وُجدت قناة، سأنشرها وأثبتها فيها أيضاً.\n"
+            "لإلغاء: /cancel"
+        )
+    elif action == "broadcast_channels":
+        set_owner_state(uid, "broadcast_channels")
+        await q.message.reply_text(
+            "📢 أرسل الرسالة (نص أو وسائط) وسأرسلها لجميع القنوات التي البوت مشرف فيها.\n"
             "لإلغاء: /cancel"
         )
     elif action == "channel":
