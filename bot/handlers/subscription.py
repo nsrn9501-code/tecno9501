@@ -1,4 +1,5 @@
 """فحص الاشتراك الإجباري والحدود اليومية."""
+import logging
 import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -6,6 +7,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from .. import db
 from ..config import DAILY_LIMIT_FREE, DAILY_LIMIT_VIP, OWNER_ID
 from ..state import _LAST_OWNER_NOTIFY
+
+logger = logging.getLogger(__name__)
 
 
 async def sub_status(bot, user_id):
@@ -23,8 +26,10 @@ async def sub_status(bot, user_id):
             member = await bot.get_chat_member(chat_id=ch["id"], user_id=user_id)
             if member.status not in ("member", "administrator", "creator"):
                 return "no"
-        except Exception:
-            # إذا القناة غير قابلة للفحص، نعتبرها ok (تجنب الحجب بالخطأ)
+        except Exception as e:
+            logger.warning("⚠️ فشل فحص القناة %s (%s) للمستخدم %s: %s", ch["name"], ch["id"], user_id, e)
+            # إذا البوت ما يقدر يتحقق = القناة غلط أو البوت مش مشرف
+            # نطلب الاشتراك (لا نترك الباب مفتوح)
             now = time.time()
             if now - _LAST_OWNER_NOTIFY.get(f"channel:{ch['id']}", 0) > 300:
                 _LAST_OWNER_NOTIFY[f"channel:{ch['id']}"] = now
@@ -36,6 +41,7 @@ async def sub_status(bot, user_id):
                     )
                 except Exception:
                     pass
+            return "no"
     return "ok"
 
 
