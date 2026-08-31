@@ -125,7 +125,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
             user_disp = (user.get("first_name") or "مستخدم")
             user_uname = user.get("username") or "—"
             # مهل أقصر بكثير للسرعة القصوى
-            timeout = 90 if platform in ("instagram", "tiktok", "facebook") else 120
+            timeout = 60 if platform in ("instagram", "tiktok", "facebook") else 75
             if kind == "audio":
                 path, title = await _retry_download(download_audio, url, timeout=timeout)
             else:
@@ -135,7 +135,7 @@ async def schedule_download(*, bot, chat_id, uid, url, platform, kind, status_id
                 if max_height:
                     max_h = max_height
                 else:
-                    max_h = 720 if (u and u["is_vip"]) else 360
+                    max_h = 480 if (u and u["is_vip"]) else 240
                 path, title = await _retry_download(download_video, url, max_h, timeout=timeout)
 
             icon = "🎵" if kind == "audio" else "🎬"

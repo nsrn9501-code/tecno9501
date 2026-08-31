@@ -50,18 +50,21 @@ def _cookie_file(platform):
 
 
 def _base_opts(platform, outtmpl):
+    """خيارات yt-dlp محسّنة للسرعة على HF Spaces."""
     opts = {
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        "retries": 5,
-        "fragment_retries": 5,
-        "socket_timeout": 45,
-        "concurrent_fragment_downloads": 16,
-        "http_chunk_size": 20 * 1024 * 1024,
-        "extractor_retries": 5,
+        "nocheckcertificate": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "socket_timeout": 30,
+        "concurrent_fragment_downloads": 8,
+        "http_chunk_size": 10 * 1024 * 1024,
+        "extractor_retries": 2,
+        "extractor_args": {"youtube": {"skip": ["dash", "m3u8"]}},
         "proxy": "",
         "geo_bypass": True,
         "http_headers": {
@@ -143,10 +146,11 @@ def download_video(url, max_height=1080):
     # أهم أولوية: صيغة معدنية (مدمجة) واحدة بـ H.264 (avc1) بامتداد mp4 —
     # لأنها تشتغل في تيليجرام مباشرة بدون تحويل (كما جربناها سابقاً).
     # وإلا DASH H.264، ثم أي فيديو (يُحوَّل لاحقاً إلى H.264). لا صوت فقط أبداً.
-    fmt = (f"best[vcodec~='^(avc1|h264)'][ext=mp4][height<=?{max_height}]"
-           f"/bestvideo[vcodec~='^(avc1|h264)'][ext=mp4][height<=?{max_height}]+bestaudio"
+    # صيغة محسّنة للسرعة — mp4 مدمج أولاً، بدون DASH
+    fmt = (f"best[ext=mp4][height<=?{max_height}]"
+           f"/best[height<=?{max_height}][ext=mp4]"
            f"/bestvideo[ext=mp4][height<=?{max_height}]+bestaudio"
-           f"/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best")
+           f"/best[ext=mp4]/best")
     opts.update({
         "format": fmt,
         "merge_output_format": "mp4",
