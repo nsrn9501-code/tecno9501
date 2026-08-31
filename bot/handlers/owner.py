@@ -44,7 +44,6 @@ def owner_keyboard():
                 InlineKeyboardButton("🎬 قناة الرفع", callback_data="own:upload_channel"),
             ],
             [
-                InlineKeyboardButton("👑 منح نقاط", callback_data="own:points"),
                 InlineKeyboardButton("🚫 حظر / فك", callback_data="own:ban"),
             ],
             [
@@ -388,33 +387,7 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"📊 إجمالي القنوات: <b>{len(channels)}</b>",
             parse_mode=ParseMode.HTML,
         )
-    elif action == "points":
-        clear_owner_state(uid)
-        parts = text.split()
-        if len(parts) != 2 or not parts[0].lstrip("-").isdigit() or not parts[1].lstrip("-").isdigit():
-            await update.message.reply_text(
-                "❌ الصيغة غير صحيحة.\nأرسل: <code>ID عدد_النقاط</code>", parse_mode=ParseMode.HTML
-            )
-            return
-        target_id, points = int(parts[0]), int(parts[1])
-        if not db.get_user(target_id):
-            await update.message.reply_text(f"❌ المستخدم {target_id} غير موجود بقاعدة البيانات.")
-            return
-        db.add_points(target_id, points)
-        u = db.get_user(target_id)
-        status = " وتم ترقيته إلى VIP 👑" if u["is_vip"] else ""
-        await update.message.reply_text(
-            f"✅ تم تعديل نقاط المستخدم {target_id} بمقدار {points:+d}\n"
-            f"نقاطه الآن: <b>{u['points']}</b>{status}",
-            parse_mode=ParseMode.HTML,
-        )
-        try:
-            await context.bot.send_message(
-                target_id,
-                f"⚙️ تم تعديل نقاطك من قبل الإدارة: {points:+d}\nنقاطك الآن: {u['points']}",
-            )
-        except Exception:
-            pass
+
     elif action == "group_set":
         clear_owner_state(uid)
         db.set_setting("discussion_group", text)
@@ -422,18 +395,6 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             f"✅ تم تعيين كروب المناقشة وتشغيله:\n🔗 {text}\n\n"
             "يمكنك إيقافه أو تغييره لاحقاً من لوحة المطور.",
-        )
-    elif action == "grant_vip":
-        set_owner_state(uid, "grant_vip")
-        await q.message.reply_text(
-            "⭐ أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لترقيته إلى VIP.\n"
-            "لإلغاء: /cancel"
-        )
-    elif action == "revoke_vip":
-        set_owner_state(uid, "revoke_vip")
-        await q.message.reply_text(
-            "🚫 أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لإلغاء الـ VIP.\n"
-            "لإلغاء: /cancel"
         )
     elif action == "gift":
         clear_owner_state(uid)
@@ -707,11 +668,17 @@ async def owner_cb(q, context, action, uid, chat_id):
     elif action == "group:off":
         db.set_setting("group_enabled", "0")
         await q.message.reply_text("✅ تم إيقاف كروب المناقشة.")
-    elif action == "points":
-        set_owner_state(uid, "points")
+    elif action == "grant_vip":
+        set_owner_state(uid, "grant_vip")
         await q.message.reply_text(
-            "👑 أرسل: <code>ID عدد_النقاط</code>\nمثال: <code>123456 50</code>\n"
-            "لإلغاء: /cancel", parse_mode=ParseMode.HTML
+            "⭐ أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لترقيته إلى VIP.\n"
+            "لإلغاء: /cancel"
+        )
+    elif action == "revoke_vip":
+        set_owner_state(uid, "revoke_vip")
+        await q.message.reply_text(
+            "🚫 أرسل ID المستخدم أو @يوزرنيم أو رد على رسالته لإلغاء الـ VIP.\n"
+            "لإلغاء: /cancel"
         )
     elif action == "gift":
         set_owner_state(uid, "gift")
