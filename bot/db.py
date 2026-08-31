@@ -506,3 +506,66 @@ def get_fact_offset(user_id, category):
 
 def set_fact_offset(user_id, category, idx):
     set_setting(f"fact_offset_{category}_{user_id}", str(idx))
+
+
+# ---- قنوات الاشتراك الإجباري (متعددة) ----
+import json
+
+
+def get_subscription_channels():
+    """يجلب جميع قنوات الاشتراك الإجباري كقائمة dicts."""
+    raw = get_setting("subscription_channels", "")
+    if not raw:
+        cid = get_setting("channel_id", "")
+        if cid:
+            return [{
+                "id": cid,
+                "name": get_setting("channel_name", ""),
+                "url": get_setting("channel_url", ""),
+            }]
+        return []
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def add_subscription_channel(chat_id, title, url=""):
+    """تضيف قناة اشتراك جديدة."""
+    channels = get_subscription_channels()
+    for ch in channels:
+        if ch["id"] == chat_id:
+            return False, "هذه القناة مضافة مسبقاً!"
+    channels.append({"id": chat_id, "name": title, "url": url})
+    set_setting("subscription_channels", json.dumps(channels))
+    if len(channels) == 1:
+        set_setting("channel_id", channels[0]["id"])
+        set_setting("channel_name", channels[0]["name"])
+        set_setting("channel_url", channels[0]["url"])
+    return True, f"✅ تمت إضافة القناة: {title}"
+
+
+def remove_subscription_channel(chat_id):
+    """تزيل قناة بالـ id."""
+    channels = get_subscription_channels()
+    new_channels = [ch for ch in channels if ch["id"] != chat_id]
+    if len(new_channels) == len(channels):
+        return False, "هذه القناة غير موجودة في القائمة!"
+    set_setting("subscription_channels", json.dumps(new_channels))
+    if new_channels:
+        set_setting("channel_id", new_channels[0]["id"])
+        set_setting("channel_name", new_channels[0]["name"])
+        set_setting("channel_url", new_channels[0]["url"])
+    else:
+        set_setting("channel_id", "")
+        set_setting("channel_name", "")
+        set_setting("channel_url", "")
+    return True, "✅ تمت إزالة القناة."
+
+
+def remove_all_subscription_channels():
+    """تزل جميع القنوات."""
+    set_setting("subscription_channels", json.dumps([]))
+    set_setting("channel_id", "")
+    set_setting("channel_name", "")
+    set_setting("channel_url", "")

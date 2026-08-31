@@ -220,12 +220,47 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif action == "channel":
         clear_owner_state(uid)
-        if text.strip().lower() == "remove":
-            db.set_setting("channel_id", "")
-            db.set_setting("channel_name", "")
-            db.set_setting("channel_url", "")
-            await update.message.reply_text("✅ تمت إزالة الاشتراك الإجباري.")
+        text_low = text.strip().lower()
+
+        # إزالة الكل
+        if text_low == "remove all":
+            db.remove_all_subscription_channels()
+            await update.message.reply_text("✅ تمت إزالة جميع قنوات الاشتراك الإجباري.")
             return
+
+        # إزالة قناة محددة
+        if text_low.startswith("remove"):
+            parts = text.strip().split(maxsplit=1)
+            if len(parts) < 2:
+                await update.message.reply_text(
+                    "❌ أرسل: <code>remove @ChannelName</code> أو <code>remove -100xxx</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            target = parts[1].strip()
+            channels = db.get_subscription_channels()
+            removed = False
+            for ch in channels:
+                if target.lower() in (ch["id"].lower(), ch["name"].lower().replace("@", "")):
+                    ok, msg = db.remove_subscription_channel(ch["id"])
+                    if ok:
+                        removed = True
+                        await update.message.reply_text(f"✅ تمت إزالة: {ch['name']}")
+                        break
+            if not removed:
+                # محاولة بالبحث الجزئي
+                for ch in channels:
+                    if target.lower().replace("@", "") in ch["name"].lower().replace("@", ""):
+                        ok, msg = db.remove_subscription_channel(ch["id"])
+                        if ok:
+                            await update.message.reply_text(f"✅ تمت إزالة: {ch['name']}")
+                            removed = True
+                            break
+            if not removed:
+                await update.message.reply_text("❌ لم يتم العثور على القناة المطلوبة.")
+            return
+
+        # إضافة قناة جديدة
         raw = text.strip()
         channel_id = raw
         if raw.startswith("@"):
@@ -240,20 +275,48 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             channel_name = raw
             channel_id = raw
+
         # محاولة مع إعادة المحاولة (HF Spaces بطيء أحياناً)
         chat = None
         for attempt in range(3):
             try:
                 chat = await context.bot.get_chat(channel_id)
                 break
-            except Exception:
+            except Exception as e:
                 if attempt < 2:
                     await asyncio.sleep(1)
                 else:
-                    raise
+                    err_msg = str(e)
+                    if "not enough rights" in err_msg.lower() or "forbidden" in err_msg.lower():
+                        await update.message.reply_text(
+                            "❌ البوت لاملك صلاحيات كافية في القناة.\n"
+                            "تأكد أن البوت <b>مشرف (admin)</b> في القناة مع صلاحيات \"قراءة الرسائل\".",
+                            parse_mode=ParseMode.HTML,
+                        )
+                    elif "chat not found" in err_msg.lower() or "bad request" in err_msg.lower():
+                        await update.message.reply_text(
+                            "❌ القناة غير موجودة أو البوت غير موجود فيها.\n\n"
+                            "✅ <b>الحل:</b>\n"
+                            "1. أضف البوت كمشرف في القناة أولاً\n"
+                            "2. ثم أرسل المعرف هنا\n\n"
+                            "💡 يمكنك أيضاً توجيه رسالة من القناة بدلاً من كتابة المعرف.",
+                            parse_mode=ParseMode.HTML,
+                        )
+                    else:
+                        await update.message.reply_text(
+                            f"❌ تعذر إيجاد القناة: <code>{esc(err_msg[:200])}</code>\n\n"
+                            "💡 تأكد أن:\n"
+                            "1. البوت مشرف في القناة\n"
+                            "2. المعرف صحيح\n"
+                            "3. يمكنك توجيه رسالة من القناة بدلاً من كتابة المعرف",
+                            parse_mode=ParseMode.HTML,
+                        )
+                    return
+
         if not chat:
             await update.message.reply_text("❌ تعذر إيجاد القناة. تأكد من المعرف.")
             return
+
         cid = str(chat.id)
         uname = chat.username or ""
         invite_url = ""
@@ -262,19 +325,28 @@ async def handle_owner_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             invite_url = invite.invite_link
         except Exception:
             pass
-        db.set_setting("channel_id", cid)
-        db.set_setting("channel_name", f"@{uname}" if uname else chat.title or "")
-        db.set_setting("channel_url", invite_url or (f"https://t.me/{uname}" if uname else ""))
+
+        channel_url = invite_url or (f"https://t.me/{uname}" if uname else "")
+        channel_display = f"@{uname}" if uname else (chat.title or cid)
+
+        ok, msg = db.add_subscription_channel(cid, channel_display, channel_url)
+        if not ok:
+            await update.message.reply_text(f"⚠️ {msg}")
+            return
+
         try:
             await context.bot.get_chat_member(cid, OWNER_ID)
             check_ok = "✅"
         except Exception:
             check_ok = "⚠️"
+
+        channels = db.get_subscription_channels()
         await update.message.reply_text(
-            f"✅ تم تعيين قناة الاشتراك الإجباري:\n"
+            f"{msg}\n"
             f"🆔 <code>{cid}</code>\n📛 {chat.title or '—'}\n"
-            f"🔗 {invite_url or 'بدون رابط (قناة عامة)'}\n"
-            f"فحص العضوية: {check_ok} (تأكد أن البوت مشرف في القناة)",
+            f"🔗 {channel_url or 'بدون رابط (قناة عامة)'}\n"
+            f"فحص العضوية: {check_ok}\n\n"
+            f"📊 إجمالي القنوات: <b>{len(channels)}</b>",
             parse_mode=ParseMode.HTML,
         )
     elif action == "points":
@@ -504,12 +576,27 @@ async def owner_cb(q, context, action, uid, chat_id):
             "لإلغاء: /cancel"
         )
     elif action == "channel":
+        channels = db.get_subscription_channels()
+        lines = ["🔐 <b>قنوات الاشتراك الإجباري</b>", ""]
+        if channels:
+            for i, ch in enumerate(channels, 1):
+                lines.append(f"{i}. {esc(ch['name'])} — <code>{ch['id']}</code>")
+        else:
+            lines.append("❌ لا توجد قنوات مضافة حالياً.")
+        lines.extend([
+            "",
+            "أرسل معرف قناة لإضافتها: <code>@ChannelName</code>",
+            "أو <code>-100xxxxxxxxxx</code>",
+            "أو رابط: <code>https://t.me/channel</code>",
+            "",
+            "⚠️ يجب أن يكون البوت <b>مشرفاً</b> في القناة.",
+            "لإزالة قناة: أرسل <code>remove @ChannelName</code> أو <code>remove -100xxx</code>",
+            "لإزالة الكل: أرسل <code>remove all</code>",
+            "لإلغاء: /cancel",
+        ])
         set_owner_state(uid, "channel")
         await q.message.reply_text(
-            "🔐 أرسل معرف القناة (@ChannelName أو -100xxxxxxxxxx)\n\n"
-            "⚠️ يجب أن يكون البوت <b>مشرفاً</b> في القناة.\n"
-            "لإزالة الاشتراك الإجباري أرسل: <code>remove</code>\n"
-            "لإلغاء: /cancel",
+            "\n".join(lines),
             parse_mode=ParseMode.HTML,
         )
     elif action == "upload_channel":
@@ -528,10 +615,14 @@ async def owner_cb(q, context, action, uid, chat_id):
         set_owner_state(uid, "set_upload_channel")
 
     elif action == "settings":
-        ch = db.get_setting("channel_id") or "غير مفعلة"
+        channels = db.get_subscription_channels()
+        if channels:
+            ch_lines = "\n".join([f"  {i+1}. {esc(ch['name'])} (<code>{ch['id']}</code>)" for i, ch in enumerate(channels)])
+        else:
+            ch_lines = "  ❌ غير مفعلة"
         txt = (
             "⚙️ <b>الإعدادات الحالية</b>\n\n"
-            f"🔐 القناة: <code>{ch}</code>\n"
+            f"🔐 قنوات الاشتراك:\n{ch_lines}\n\n"
             f"📥 حد التحميل اليومي (عادي): {db.get_setting('daily_limit_free')}\n"
             f"📥 حد التحميل اليومي (VIP): {db.get_setting('daily_limit_vip')}\n\n"
             "لتعديل الحدود اضغط زر «📥 حدود التحميل» بالأعلى."
