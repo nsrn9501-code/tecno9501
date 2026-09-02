@@ -1,26 +1,38 @@
 import sqlite3
+import threading
 from contextlib import contextmanager
 
 from .config import DAILY_REWARD_POINTS, DB_PATH, GIFT_POINTS, OWNER_ID, POINTS_PER_REFERRAL, VIP_THRESHOLD
 
+# ─── Singleton connection + Lock (fixes "database is locked" on PythonAnywhere) ───
+_lock = threading.Lock()
+_conn = None
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=60)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA busy_timeout=10000;")
-    return conn
+
+def _get_conn():
+    """Get or create a single shared SQLite connection."""
+    global _conn
+    if _conn is None:
+        _conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=120)
+        _conn.row_factory = sqlite3.Row
+        _conn.execute("PRAGMA journal_mode=WAL;")
+        _conn.execute("PRAGMA synchronous=NORMAL;")
+        _conn.execute("PRAGMA busy_timeout=30000;")
+        _conn.execute("PRAGMA cache_size=-8000;")  # 8MB cache
+    return _conn
 
 
 @contextmanager
 def cursor():
-    conn = get_conn()
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    """Thread-safe cursor using a single shared connection + Lock."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def init_db():
@@ -107,24 +119,7 @@ def init_db():
                 until REAL
             )
         ''')
-        # migration: add downloads detail columns if missing
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()]
-        if "title" not in cols:
-            conn.execute("ALTER TABLE downloads ADD COLUMN title TEXT")
-        if "filesize" not in cols:
-            conn.execute("ALTER TABLE downloads ADD COLUMN filesize INTEGER")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('gift_default_points', '10')")
-        # Ensure default settings
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_id', '')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_name', '')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('channel_url', '')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_limit_free', '3')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_limit_vip', '20')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_free', '5')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_link_limit_vip', '15')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_free', '5')")
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_search_limit_vip', '15')")
-        # user_prefs table — same connection to avoid lock
+        # user_prefs table — created in init_db to avoid separate open/close
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_prefs (
                 user_id INTEGER PRIMARY KEY,
@@ -132,9 +127,29 @@ def init_db():
                 welcomed INTEGER DEFAULT 0
             )
         ''')
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
-        if "welcomed" not in cols:
+        # migration: add downloads detail columns if missing
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(downloads)").fetchall()]
+        if "title" not in cols:
+            conn.execute("ALTER TABLE downloads ADD COLUMN title TEXT")
+        if "filesize" not in cols:
+            conn.execute("ALTER TABLE downloads ADD COLUMN filesize INTEGER")
+        cols2 = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
+        if "welcomed" not in cols2:
             conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
+        # Ensure default settings
+        for k, v in [
+            ('gift_default_points', '10'),
+            ('channel_id', ''),
+            ('channel_name', ''),
+            ('channel_url', ''),
+            ('daily_limit_free', '3'),
+            ('daily_limit_vip', '20'),
+            ('daily_link_limit_free', '5'),
+            ('daily_link_limit_vip', '15'),
+            ('daily_search_limit_free', '5'),
+            ('daily_search_limit_vip', '15'),
+        ]:
+            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)", (k, v))
 
 
 # ---- users ----
@@ -169,7 +184,6 @@ def create_user(user_id, username=None, first_name=None, invited_by=None):
 
 
 def claim_daily_reward(user_id):
-    """يضيف مكافأة يومية مرة واحدة فقط في اليوم. يعيد True إن نجح."""
     today = _today()
     with cursor() as conn:
         row = conn.execute(
@@ -207,7 +221,6 @@ def get_or_create_user(user_id, username=None, first_name=None, invited_by=None)
         u = get_user(user_id)
         credited = is_new
     else:
-        # refresh username/name on interaction
         with cursor() as conn:
             conn.execute("UPDATE users SET username=?, first_name=? WHERE id=?",
                          (username, first_name, user_id))
@@ -276,7 +289,6 @@ def create_gift_link(owner_id, max_uses, points=GIFT_POINTS):
 
 
 def redeem_gift_link(code, user_id):
-    """يعيد (نجاح، نقاط، رسالة) عند استعمال رابط هدية."""
     with cursor() as conn:
         row = conn.execute("SELECT * FROM gift_links WHERE code=?", (code,)).fetchone()
         if not row:
@@ -366,7 +378,6 @@ def increment_usage(user_id, usage_type):
 
 
 def usage_limit(uid, usage_type):
-    """يعيد الحد اليومي حسب النوع (روابط/بحث) وحالة VIP."""
     u = get_user(uid)
     is_vip = bool(u and u["is_vip"])
     prefix = f"daily_{usage_type}_limit"
@@ -376,7 +387,6 @@ def usage_limit(uid, usage_type):
 
 
 def can_use(uid, usage_type):
-    """(ok, msg) — يفحص الحد اليومي للروابط أو البحث."""
     if uid == OWNER_ID:
         return True, ""
     limit = usage_limit(uid, usage_type)
@@ -388,7 +398,6 @@ def can_use(uid, usage_type):
 
 
 def consume_usage(uid, usage_type):
-    """يستهلك وحدة من حد اليوم: يرجع (ok, msg) ويزيد العداد إن كان متاحاً."""
     ok, msg = can_use(uid, usage_type)
     if not ok:
         return False, msg
@@ -396,7 +405,7 @@ def consume_usage(uid, usage_type):
     return True, ""
 
 
-# ---- تقييد السرعة (3 روابط/دقيقة أو تكرار نفس الرابط) ----
+# ---- تقييد السرعة ----
 def _normalize_url(url):
     u = (url or "").strip().split("?")[0].split("#")[0].rstrip("/")
     return u.lower()
@@ -417,7 +426,6 @@ def clear_rate_ban(user_id):
 
 
 def get_rate_ban(user_id):
-    """يعيد (متبقي_ثواني) أو 0 إن لم يكن مقيّداً."""
     if user_id == OWNER_ID:
         return 0
     with cursor() as conn:
@@ -431,36 +439,8 @@ def get_rate_ban(user_id):
     return int(left)
 
 
-# ---- تفضيلات المستخدمين (نوع المعلومة التي يريدها بعد كل تحميل) ----
-def _user_prefs_table():
-    import time
-    for attempt in range(5):
-        try:
-            with cursor() as conn:
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute("PRAGMA busy_timeout=5000;")
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS user_prefs (
-                        user_id INTEGER PRIMARY KEY,
-                        fact_category TEXT DEFAULT 'both',
-                        welcomed INTEGER DEFAULT 0
-                    )
-                ''')
-                cols = [r[1] for r in conn.execute("PRAGMA table_info(user_prefs)").fetchall()]
-                if "welcomed" not in cols:
-                    conn.execute("ALTER TABLE user_prefs ADD COLUMN welcomed INTEGER DEFAULT 0")
-            return
-        except Exception:
-            time.sleep(0.5 * (attempt + 1))
-
-
-def init_db_prefs():
-    """ينشئ جدول تفضيلات المستخدمين (يُستدعى ضمن init_db)."""
-    _user_prefs_table()
-
-
+# ---- تفضيلات المستخدمين ----
 def set_fact_category(user_id, category):
-    _user_prefs_table()
     with cursor() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO user_prefs (user_id, fact_category) VALUES (?,?)",
@@ -469,7 +449,6 @@ def set_fact_category(user_id, category):
 
 
 def get_fact_welcomed(user_id):
-    _user_prefs_table()
     with cursor() as conn:
         row = conn.execute(
             "SELECT welcomed FROM user_prefs WHERE user_id=?", (user_id,)
@@ -478,13 +457,11 @@ def get_fact_welcomed(user_id):
 
 
 def mark_fact_welcomed(user_id):
-    _user_prefs_table()
     with cursor() as conn:
         conn.execute("UPDATE user_prefs SET welcomed=1 WHERE user_id=?", (user_id,))
 
 
 def get_fact_category(user_id):
-    _user_prefs_table()
     with cursor() as conn:
         row = conn.execute(
             "SELECT fact_category FROM user_prefs WHERE user_id=?", (user_id,)
@@ -492,7 +469,6 @@ def get_fact_category(user_id):
     return row["fact_category"] if row else "both"
 
 
-# ---- فهرس تقدم المعلومات (لمنع التكرار) ----
 def get_fact_offset(user_id, category):
     with cursor() as conn:
         row = conn.execute(
@@ -513,7 +489,6 @@ import json
 
 
 def get_subscription_channels():
-    """يجلب جميع قنوات الاشتراك الإجباري كقائمة dicts."""
     raw = get_setting("subscription_channels", "")
     if not raw:
         cid = get_setting("channel_id", "")
@@ -531,7 +506,6 @@ def get_subscription_channels():
 
 
 def add_subscription_channel(chat_id, title, url=""):
-    """تضيف قناة اشتراك جديدة."""
     channels = get_subscription_channels()
     for ch in channels:
         if ch["id"] == chat_id:
@@ -546,7 +520,6 @@ def add_subscription_channel(chat_id, title, url=""):
 
 
 def remove_subscription_channel(chat_id):
-    """تزيل قناة بالـ id."""
     channels = get_subscription_channels()
     new_channels = [ch for ch in channels if ch["id"] != chat_id]
     if len(new_channels) == len(channels):
@@ -564,7 +537,6 @@ def remove_subscription_channel(chat_id):
 
 
 def remove_all_subscription_channels():
-    """تزل جميع القنوات."""
     set_setting("subscription_channels", json.dumps([]))
     set_setting("channel_id", "")
     set_setting("channel_name", "")
