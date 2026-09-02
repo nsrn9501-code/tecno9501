@@ -7,12 +7,16 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 INSTAGRAM_SESSION_ID = os.getenv("INSTAGRAM_SESSION_ID", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-# مسار التخزين الدائم — على HuggingFace Spaces المقروء/الكتابة يتم في /data
-# (مجلد مركز البيانات يُمسح عند كل إعادة تشغيل، بينما /data يبقى)
-if os.getenv("HF_SPACE", ""):
+# كشف تلقائي لـ HuggingFace Spaces — مجلد /data هو التخزين الدائم
+IS_HF = os.path.exists("/data") or os.getenv("HF_SPACE", "") == "1"
+
+if IS_HF:
     DATA_ROOT = "/data"
 else:
     DATA_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+
+# قاعدة البيانات: خارجية (DATABASE_URL) أو محلية (SQLite)
+DATABASE_URL = os.getenv("DATABASE_URL", "")  # مثال: postgresql://... أو sqlite:///data/bot.db
 
 DB_PATH = os.path.join(DATA_ROOT, "bot.db")
 DOWNLOAD_DIR = os.path.join(DATA_ROOT, "downloads")
