@@ -117,6 +117,17 @@ def _process_update(app, update_json):
     from telegram import Update
     _restore_proxies()
     try:
+        # Telegram can send updates missing first_name/username -> patch them
+        if "message" in update_json and isinstance(update_json.get("message"), dict):
+            _msg = update_json["message"]
+            if "from" in _msg and isinstance(_msg["from"], dict):
+                _msg["from"].setdefault("first_name", "")
+                _msg["from"].setdefault("username", "")
+        if "callback_query" in update_json and update_json.get("callback_query"):
+            _cq = update_json["callback_query"]
+            if "from" in _cq and isinstance(_cq["from"], dict):
+                _cq["from"].setdefault("first_name", "")
+                _cq["from"].setdefault("username", "")
         update = Update.de_json(update_json, app.bot)
         if update is None:
             return "bad update", 400
