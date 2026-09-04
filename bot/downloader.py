@@ -12,9 +12,11 @@ from yt_dlp import YoutubeDL
 from .config import DOWNLOAD_DIR, COOKIES_DIR, MAX_FILE_SIZE
 from . import cache
 
-# تعطيل البروكسي على HuggingFace Spaces (يسبب خطأ 403 Forbidden)
-for _v in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy'):
-    os.environ.pop(_v, None)
+# تعطيل البروكسي فقط على HuggingFace Spaces (يسبب خطأ 403 Forbidden)
+# لا نحذف البروكسي على PythonAnywhere لأنه ضروري للتواصل مع Telegram API
+if os.environ.get("SYSTEM") == "spaces" or os.path.exists("/app/README.md"):
+    for _v in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy'):
+        os.environ.pop(_v, None)
 
 PLATFORM_PATTERNS = [
     ("youtube", r"(youtube\.com|youtu\.be)"),
